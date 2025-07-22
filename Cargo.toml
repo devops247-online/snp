@@ -1,0 +1,59 @@
+[package]
+name = "snp"
+version = "0.1.0"
+edition = "2021"
+authors = ["SNP Contributors"]
+description = "SNP (Shell Not Pass) - A fast, reliable pre-commit framework written in Rust"
+repository = "https://github.com/devops247-online/snp"
+license = "MIT"
+keywords = ["git", "hooks", "pre-commit", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "snp"
+path = "src/main.rs"
+
+[dependencies]
+# CLI framework
+clap = { version = "4.4", features = ["derive", "color", "suggestions"] }
+
+# Serialization and configuration
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Git operations
+git2 = "0.18"
+
+# File system and utilities
+regex = "1.10"
+walkdir = "2.4"
+tempfile = "3.8"
+
+# Process management
+which = "5.0"
+
+[dev-dependencies]
+# Testing utilities
+assert_cmd = "2.0"
+predicates = "3.0"
+tempfile = "3.8"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+debug = true
