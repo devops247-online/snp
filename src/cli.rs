@@ -156,7 +156,7 @@ pub enum Commands {
 
     /// Produce a sample .pre-commit-config.yaml file
     SampleConfig,
-    
+
     /// Generate shell completion scripts
     GenerateCompletion {
         /// Shell to generate completion for
@@ -168,23 +168,28 @@ impl Cli {
     pub fn run(&self) -> Result<i32> {
         // Initialize logging based on verbosity
         self.init_logging();
-        
+
         // Validate conflicting flags
         if self.verbose && self.quiet {
             return Err(crate::error::SnpError::Cli(
-                "Cannot specify both --verbose and --quiet flags".to_string()
+                "Cannot specify both --verbose and --quiet flags".to_string(),
             ));
         }
 
         match &self.command {
-            Some(Commands::Run { hook, all_files, files, .. }) => {
+            Some(Commands::Run {
+                hook,
+                all_files,
+                files,
+                ..
+            }) => {
                 // Validate run command arguments
                 if *all_files && !files.is_empty() {
                     return Err(crate::error::SnpError::Cli(
-                        "Cannot specify both --all-files and --files options".to_string()
+                        "Cannot specify both --all-files and --files options".to_string(),
                     ));
                 }
-                
+
                 if let Some(hook_id) = hook {
                     println!("Running hook: {hook_id}");
                 } else if *all_files {
@@ -248,7 +253,7 @@ mod tests {
     fn test_cli_parsing_version() {
         // Test that --version flag is properly handled by clap
         // This will be validated by integration tests
-        let cli = Cli::try_parse_from(&["snp", "--version"]);
+        let cli = Cli::try_parse_from(["snp", "--version"]);
         // clap handles --version internally, so this will error with exit code 0
         assert!(cli.is_err());
     }
@@ -256,14 +261,14 @@ mod tests {
     #[test]
     fn test_cli_parsing_help() {
         // Test that --help flag is properly handled
-        let cli = Cli::try_parse_from(&["snp", "--help"]);
+        let cli = Cli::try_parse_from(["snp", "--help"]);
         // clap handles --help internally, so this will error with exit code 0
         assert!(cli.is_err());
     }
 
     #[test]
     fn test_cli_default_config() {
-        let cli = Cli::try_parse_from(&["snp"]).unwrap();
+        let cli = Cli::try_parse_from(["snp"]).unwrap();
         assert_eq!(cli.config, ".pre-commit-config.yaml");
         assert!(!cli.verbose);
         assert!(!cli.quiet);
@@ -271,7 +276,7 @@ mod tests {
 
     #[test]
     fn test_cli_run_command() {
-        let cli = Cli::try_parse_from(&["snp", "run", "--all-files"]).unwrap();
+        let cli = Cli::try_parse_from(["snp", "run", "--all-files"]).unwrap();
         match cli.command {
             Some(Commands::Run { all_files, .. }) => assert!(all_files),
             _ => panic!("Expected Run command"),
@@ -280,7 +285,7 @@ mod tests {
 
     #[test]
     fn test_cli_install_command() {
-        let cli = Cli::try_parse_from(&["snp", "install", "--overwrite"]).unwrap();
+        let cli = Cli::try_parse_from(["snp", "install", "--overwrite"]).unwrap();
         match cli.command {
             Some(Commands::Install { overwrite, .. }) => assert!(overwrite),
             _ => panic!("Expected Install command"),

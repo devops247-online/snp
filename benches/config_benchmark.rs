@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use snp::config::Config;
 
 fn benchmark_config_parsing(c: &mut Criterion) {
@@ -179,25 +179,21 @@ ci:
   skip: [mypy, pytest]
 "#;
 
-    let configs = vec![
+    let configs = [
         ("small", small_config),
-        ("medium", medium_config), 
+        ("medium", medium_config),
         ("large", large_config),
     ];
 
     // Benchmark parsing different config sizes
     let mut group = c.benchmark_group("config_parsing");
     for (name, config) in configs.iter() {
-        group.bench_with_input(
-            BenchmarkId::new("parse_yaml", name),
-            config,
-            |b, config| {
-                b.iter(|| {
-                    let result = Config::from_yaml(black_box(config));
-                    black_box(result)
-                })
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("parse_yaml", name), config, |b, config| {
+            b.iter(|| {
+                let result = Config::from_yaml(black_box(config));
+                black_box(result)
+            })
+        });
     }
     group.finish();
 
@@ -220,7 +216,7 @@ ci:
         b.iter(|| {
             for config in &invalid_configs {
                 let result = Config::from_yaml(black_box(config));
-                black_box(result);
+                let _ = black_box(result);
             }
         })
     });
@@ -228,9 +224,9 @@ ci:
     // Benchmark file parsing (create temporary file)
     use std::io::Write;
     use tempfile::NamedTempFile;
-    
+
     let mut temp_file = NamedTempFile::new().unwrap();
-    write!(temp_file, "{}", large_config).unwrap();
+    write!(temp_file, "{large_config}").unwrap();
     let file_path = temp_file.path().to_path_buf();
 
     c.bench_function("parse_config_from_file", |b| {

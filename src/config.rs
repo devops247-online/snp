@@ -50,16 +50,26 @@ impl Config {
     pub fn from_file(path: &PathBuf) -> Result<Self> {
         // Validate file path
         if !path.exists() {
-            return Err(SnpError::Config(format!("Configuration file not found: {}", path.display())));
-        }
-        
-        if !path.is_file() {
-            return Err(SnpError::Config(format!("Configuration path is not a file: {}", path.display())));
+            return Err(SnpError::Config(format!(
+                "Configuration file not found: {}",
+                path.display()
+            )));
         }
 
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| SnpError::Config(format!("Failed to read config file {}: {e}", path.display())))?;
-        
+        if !path.is_file() {
+            return Err(SnpError::Config(format!(
+                "Configuration path is not a file: {}",
+                path.display()
+            )));
+        }
+
+        let content = std::fs::read_to_string(path).map_err(|e| {
+            SnpError::Config(format!(
+                "Failed to read config file {}: {e}",
+                path.display()
+            ))
+        })?;
+
         Self::from_yaml_with_context(&content, Some(path))
     }
 
@@ -68,16 +78,15 @@ impl Config {
     }
 
     fn from_yaml_with_context(yaml: &str, file_path: Option<&PathBuf>) -> Result<Self> {
-        let config: Config = serde_yaml::from_str(yaml)
-            .map_err(|e| {
-                let context = if let Some(path) = file_path {
-                    format!(" in file {}", path.display())
-                } else {
-                    String::new()
-                };
-                SnpError::Config(format!("YAML parsing error{}: {}", context, e))
-            })?;
-        
+        let config: Config = serde_yaml::from_str(yaml).map_err(|e| {
+            let context = if let Some(path) = file_path {
+                format!(" in file {}", path.display())
+            } else {
+                String::new()
+            };
+            SnpError::Config(format!("YAML parsing error{context}: {e}"))
+        })?;
+
         // Validate the parsed configuration
         config.validate()?;
         Ok(config)
@@ -97,19 +106,17 @@ impl Config {
 
         // Validate global file patterns
         if let Some(ref files_pattern) = self.files {
-            if let Err(_) = regex::Regex::new(files_pattern) {
+            if regex::Regex::new(files_pattern).is_err() {
                 return Err(SnpError::Config(format!(
-                    "Global 'files' has invalid regex pattern: '{}'",
-                    files_pattern
+                    "Global 'files' has invalid regex pattern: '{files_pattern}'"
                 )));
             }
         }
 
         if let Some(ref exclude_pattern) = self.exclude {
-            if let Err(_) = regex::Regex::new(exclude_pattern) {
+            if regex::Regex::new(exclude_pattern).is_err() {
                 return Err(SnpError::Config(format!(
-                    "Global 'exclude' has invalid regex pattern: '{}'",
-                    exclude_pattern
+                    "Global 'exclude' has invalid regex pattern: '{exclude_pattern}'"
                 )));
             }
         }
@@ -117,13 +124,14 @@ impl Config {
         // Validate global settings
         if let Some(ref min_version) = self.minimum_pre_commit_version {
             if min_version.is_empty() {
-                return Err(SnpError::Config("minimum_pre_commit_version cannot be empty".to_string()));
+                return Err(SnpError::Config(
+                    "minimum_pre_commit_version cannot be empty".to_string(),
+                ));
             }
             // Basic semantic version validation
             if !is_valid_version(min_version) {
                 return Err(SnpError::Config(format!(
-                    "minimum_pre_commit_version '{}' is not a valid version format",
-                    min_version
+                    "minimum_pre_commit_version '{min_version}' is not a valid version format"
                 )));
             }
         }
@@ -132,10 +140,12 @@ impl Config {
         if let Some(ref versions) = self.default_language_version {
             for (language, version) in versions {
                 if version.is_empty() {
-                    return Err(SnpError::Config(format!("Language version for '{}' cannot be empty", language)));
+                    return Err(SnpError::Config(format!(
+                        "Language version for '{language}' cannot be empty"
+                    )));
                 }
                 if !is_valid_language(language) {
-                    tracing::warn!("Unknown language in default_language_version: '{}'", language);
+                    tracing::warn!("Unknown language in default_language_version: '{language}'");
                 }
             }
         }
@@ -145,8 +155,7 @@ impl Config {
             for stage in stages {
                 if !is_valid_stage(stage) {
                     return Err(SnpError::Config(format!(
-                        "Invalid stage in default_stages: '{}'",
-                        stage
+                        "Invalid stage in default_stages: '{stage}'"
                     )));
                 }
             }
@@ -157,8 +166,7 @@ impl Config {
             for hook_type in hook_types {
                 if !is_valid_hook_type(hook_type) {
                     return Err(SnpError::Config(format!(
-                        "Invalid hook type in default_install_hook_types: '{}'",
-                        hook_type
+                        "Invalid hook type in default_install_hook_types: '{hook_type}'"
                     )));
                 }
             }
@@ -172,20 +180,24 @@ impl Repository {
     fn validate(&self, repo_idx: usize) -> Result<()> {
         // Validate repository URL/type
         if self.repo.is_empty() {
-            return Err(SnpError::Config(format!("Repository {} has empty repo field", repo_idx)));
+            return Err(SnpError::Config(format!(
+                "Repository {repo_idx} has empty repo field"
+            )));
         }
 
         // Validate revision for non-local/meta repos
         if !matches!(self.repo.as_str(), "local" | "meta") && self.rev.is_none() {
             return Err(SnpError::Config(format!(
-                "Repository {} '{}' is missing required 'rev' field",
-                repo_idx, self.repo
+                "Repository {repo_idx} '{}' is missing required 'rev' field",
+                self.repo
             )));
         }
 
         // Validate hooks
         if self.hooks.is_empty() {
-            return Err(SnpError::Config(format!("Repository {} has no hooks defined", repo_idx)));
+            return Err(SnpError::Config(format!(
+                "Repository {repo_idx} has no hooks defined"
+            )));
         }
 
         for (hook_idx, hook) in self.hooks.iter().enumerate() {
@@ -201,33 +213,36 @@ impl Hook {
         // Validate hook ID
         if self.id.is_empty() {
             return Err(SnpError::Config(format!(
-                "Hook {} in repository {} has empty id",
-                hook_idx, repo_idx
+                "Hook {hook_idx} in repository {repo_idx} has empty id"
             )));
         }
 
         // Validate file patterns are valid regex if provided
         if let Some(ref files_pattern) = self.files {
-            if let Err(_) = regex::Regex::new(files_pattern) {
+            if regex::Regex::new(files_pattern).is_err() {
                 return Err(SnpError::Config(format!(
-                    "Hook '{}' has invalid files regex pattern: '{}'",
-                    self.id, files_pattern
+                    "Hook '{}' has invalid files regex pattern: '{files_pattern}'",
+                    self.id
                 )));
             }
         }
 
         if let Some(ref exclude_pattern) = self.exclude {
-            if let Err(_) = regex::Regex::new(exclude_pattern) {
+            if regex::Regex::new(exclude_pattern).is_err() {
                 return Err(SnpError::Config(format!(
-                    "Hook '{}' has invalid exclude regex pattern: '{}'",
-                    self.id, exclude_pattern
+                    "Hook '{}' has invalid exclude regex pattern: '{exclude_pattern}'",
+                    self.id
                 )));
             }
         }
 
         // Validate language is known
         if !self.language.is_empty() && !is_valid_language(&self.language) {
-            tracing::warn!("Hook '{}' uses unknown language: '{}'", self.id, self.language);
+            tracing::warn!(
+                "Hook '{}' uses unknown language: '{}'",
+                self.id,
+                self.language
+            );
         }
 
         // Validate stages if provided
@@ -235,8 +250,8 @@ impl Hook {
             for stage in stages {
                 if !is_valid_stage(stage) {
                     return Err(SnpError::Config(format!(
-                        "Hook '{}' has invalid stage: '{}'",
-                        self.id, stage
+                        "Hook '{}' has invalid stage: '{stage}'",
+                        self.id
                     )));
                 }
             }
@@ -246,7 +261,7 @@ impl Hook {
         if let Some(ref types) = self.types {
             for type_name in types {
                 if !is_valid_file_type(type_name) {
-                    tracing::warn!("Hook '{}' uses unknown file type: '{}'", self.id, type_name);
+                    tracing::warn!("Hook '{}' uses unknown file type: '{type_name}'", self.id);
                 }
             }
         }
@@ -254,7 +269,10 @@ impl Hook {
         if let Some(ref exclude_types) = self.exclude_types {
             for type_name in exclude_types {
                 if !is_valid_file_type(type_name) {
-                    tracing::warn!("Hook '{}' uses unknown exclude file type: '{}'", self.id, type_name);
+                    tracing::warn!(
+                        "Hook '{}' uses unknown exclude file type: '{type_name}'",
+                        self.id
+                    );
                 }
             }
         }
@@ -265,54 +283,159 @@ impl Hook {
 
 // Helper function to validate languages
 fn is_valid_language(language: &str) -> bool {
-    matches!(language, 
-        "python" | "node" | "ruby" | "rust" | "go" | "java" | "swift" | 
-        "system" | "script" | "docker" | "docker_image" | "conda" | 
-        "coursier" | "dart" | "dotnet" | "fail" | "haskell" | "julia" | 
-        "lua" | "perl" | "pygrep" | "r" | "" // empty string is valid (default)
+    matches!(
+        language,
+        "python"
+            | "node"
+            | "ruby"
+            | "rust"
+            | "go"
+            | "java"
+            | "swift"
+            | "system"
+            | "script"
+            | "docker"
+            | "docker_image"
+            | "conda"
+            | "coursier"
+            | "dart"
+            | "dotnet"
+            | "fail"
+            | "haskell"
+            | "julia"
+            | "lua"
+            | "perl"
+            | "pygrep"
+            | "r"
+            | "" // empty string is valid (default)
     )
 }
 
 // Helper function to validate stages
 fn is_valid_stage(stage: &str) -> bool {
-    matches!(stage,
-        "commit" | "merge-commit" | "prepare-commit-msg" | "commit-msg" |
-        "post-commit" | "manual" | "post-checkout" | "post-merge" |
-        "pre-commit" | "pre-merge-commit" | "pre-push" | "pre-rebase" |
-        "push" | "post-rewrite"
+    matches!(
+        stage,
+        "commit"
+            | "merge-commit"
+            | "prepare-commit-msg"
+            | "commit-msg"
+            | "post-commit"
+            | "manual"
+            | "post-checkout"
+            | "post-merge"
+            | "pre-commit"
+            | "pre-merge-commit"
+            | "pre-push"
+            | "pre-rebase"
+            | "push"
+            | "post-rewrite"
     )
 }
 
 // Helper function to validate hook types
 fn is_valid_hook_type(hook_type: &str) -> bool {
-    matches!(hook_type,
-        "pre-commit" | "pre-merge-commit" | "pre-push" | "prepare-commit-msg" |
-        "commit-msg" | "post-commit" | "post-checkout" | "post-merge" |
-        "pre-rebase" | "post-rewrite"
+    matches!(
+        hook_type,
+        "pre-commit"
+            | "pre-merge-commit"
+            | "pre-push"
+            | "prepare-commit-msg"
+            | "commit-msg"
+            | "post-commit"
+            | "post-checkout"
+            | "post-merge"
+            | "pre-rebase"
+            | "post-rewrite"
     )
 }
 
 // Helper function to validate file types
 fn is_valid_file_type(file_type: &str) -> bool {
-    matches!(file_type,
-        "file" | "directory" | "symlink" | "executable" | "text" | "binary" |
-        "python" | "pyi" | "javascript" | "typescript" | "jsx" | "tsx" |
-        "json" | "yaml" | "toml" | "xml" | "html" | "css" | "scss" | "sass" |
-        "markdown" | "rst" | "dockerfile" | "makefile" | "shell" | "bash" |
-        "zsh" | "fish" | "powershell" | "batch" | "ruby" | "perl" | "php" |
-        "java" | "kotlin" | "scala" | "groovy" | "clojure" | "rust" | "go" |
-        "c" | "cpp" | "cxx" | "cc" | "h" | "hpp" | "hxx" | "objective-c" |
-        "swift" | "dart" | "lua" | "r" | "julia" | "haskell" | "erlang" |
-        "elixir" | "elm" | "fsharp" | "csharp" | "vb" | "sql" | "image" |
-        "video" | "audio" | "archive" | "compressed" | "font" | "csv" |
-        "tsv" | "log" | "ini" | "cfg" | "conf" | "properties" | "env"
+    matches!(
+        file_type,
+        "file"
+            | "directory"
+            | "symlink"
+            | "executable"
+            | "text"
+            | "binary"
+            | "python"
+            | "pyi"
+            | "javascript"
+            | "typescript"
+            | "jsx"
+            | "tsx"
+            | "json"
+            | "yaml"
+            | "toml"
+            | "xml"
+            | "html"
+            | "css"
+            | "scss"
+            | "sass"
+            | "markdown"
+            | "rst"
+            | "dockerfile"
+            | "makefile"
+            | "shell"
+            | "bash"
+            | "zsh"
+            | "fish"
+            | "powershell"
+            | "batch"
+            | "ruby"
+            | "perl"
+            | "php"
+            | "java"
+            | "kotlin"
+            | "scala"
+            | "groovy"
+            | "clojure"
+            | "rust"
+            | "go"
+            | "c"
+            | "cpp"
+            | "cxx"
+            | "cc"
+            | "h"
+            | "hpp"
+            | "hxx"
+            | "objective-c"
+            | "swift"
+            | "dart"
+            | "lua"
+            | "r"
+            | "julia"
+            | "haskell"
+            | "erlang"
+            | "elixir"
+            | "elm"
+            | "fsharp"
+            | "csharp"
+            | "vb"
+            | "sql"
+            | "image"
+            | "video"
+            | "audio"
+            | "archive"
+            | "compressed"
+            | "font"
+            | "csv"
+            | "tsv"
+            | "log"
+            | "ini"
+            | "cfg"
+            | "conf"
+            | "properties"
+            | "env"
     )
 }
 
 // Helper function to validate version strings
 fn is_valid_version(version: &str) -> bool {
     // Basic semantic version validation (major.minor.patch)
-    let version_regex = regex::Regex::new(r"^\d+(\.\d+)*(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$").unwrap();
+    let version_regex =
+        regex::Regex::new(r"^\d+(\.\d+)*(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$").unwrap();
     version_regex.is_match(version)
 }
 
@@ -400,12 +523,12 @@ fail_fast: true
 minimum_pre_commit_version: 3.0.0
 "#;
         let config = Config::from_yaml(yaml).unwrap();
-        
+
         // Test repos parsing
         assert_eq!(config.repos.len(), 2);
         assert_eq!(config.repos[0].repo, "https://github.com/psf/black");
         assert_eq!(config.repos[1].repo, "https://github.com/pycqa/flake8");
-        
+
         // Test hook details
         let black_hook = &config.repos[0].hooks[0];
         assert_eq!(black_hook.id, "black");
@@ -414,13 +537,21 @@ minimum_pre_commit_version: 3.0.0
         assert_eq!(black_hook.types.as_ref().unwrap()[0], "python");
         assert_eq!(black_hook.args.as_ref().unwrap()[0], "--line-length=88");
         assert_eq!(black_hook.exclude.as_ref().unwrap(), "^tests/");
-        
+
         // Test global settings
         assert_eq!(config.default_install_hook_types.as_ref().unwrap().len(), 2);
-        assert_eq!(config.default_language_version.as_ref().unwrap().get("python").unwrap(), "python3.9");
+        assert_eq!(
+            config
+                .default_language_version
+                .as_ref()
+                .unwrap()
+                .get("python")
+                .unwrap(),
+            "python3.9"
+        );
         assert_eq!(config.files.as_ref().unwrap(), "^src/");
         assert_eq!(config.exclude.as_ref().unwrap(), "^(tests/|docs/)");
-        assert_eq!(config.fail_fast.unwrap(), true);
+        assert!(config.fail_fast.unwrap());
         assert_eq!(config.minimum_pre_commit_version.as_ref().unwrap(), "3.0.0");
     }
 
@@ -440,13 +571,13 @@ repos:
         let config = Config::from_yaml(yaml).unwrap();
         assert_eq!(config.repos[0].repo, "local");
         assert!(config.repos[0].rev.is_none());
-        
+
         let hook = &config.repos[0].hooks[0];
         assert_eq!(hook.id, "local-script");
         assert_eq!(hook.name.as_ref().unwrap(), "Run local script");
         assert_eq!(hook.entry, "./scripts/check.sh");
         assert_eq!(hook.language, "system");
-        assert_eq!(hook.pass_filenames.unwrap(), false);
+        assert!(!hook.pass_filenames.unwrap());
     }
 
     #[test]
@@ -488,7 +619,7 @@ repos:
         assert_eq!(config.repos.len(), 1);
         assert_eq!(config.repos[0].hooks.len(), 1);
         assert_eq!(config.repos[0].hooks[0].id, "trailing-whitespace");
-        
+
         // Test that minimal hook only has required fields
         let hook = &config.repos[0].hooks[0];
         assert!(hook.entry.is_empty()); // entry is required but can be empty
@@ -503,7 +634,7 @@ default_stages: [commit]
 "#;
         let result = Config::from_yaml(yaml);
         assert!(result.is_err());
-        
+
         // Missing hook id
         let yaml = r#"
 repos:
@@ -525,10 +656,10 @@ repos:
             "repos:\n- repo:\n    invalid_indent",
             "invalid: yaml: structure: bad",
         ];
-        
+
         for yaml in invalid_yamls {
             let result = Config::from_yaml(yaml);
-            assert!(result.is_err(), "Expected error for YAML: {}", yaml);
+            assert!(result.is_err(), "Expected error for YAML: {yaml}");
         }
     }
 
@@ -571,7 +702,7 @@ repos:
 "#;
         let config = Config::from_yaml(yaml).unwrap();
         let hook = &config.repos[0].hooks[0];
-        
+
         assert_eq!(hook.types.as_ref().unwrap()[0], "file");
         assert_eq!(hook.exclude_types.as_ref().unwrap().len(), 2);
         assert_eq!(hook.exclude_types.as_ref().unwrap()[0], "image");
@@ -591,7 +722,7 @@ repos:
 "#;
         let config = Config::from_yaml(yaml).unwrap();
         let hook = &config.repos[0].hooks[0];
-        
+
         let stages = hook.stages.as_ref().unwrap();
         assert_eq!(stages.len(), 3);
         assert!(stages.contains(&"pre-commit".to_string()));
@@ -613,7 +744,10 @@ files: "[unclosed"
 "#;
         let result = Config::from_yaml(yaml);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("invalid regex pattern"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("invalid regex pattern"));
 
         // Invalid exclude pattern in hook
         let yaml = r#"
@@ -627,7 +761,10 @@ repos:
 "#;
         let result = Config::from_yaml(yaml);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("invalid exclude regex pattern"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("invalid exclude regex pattern"));
     }
 
     #[test]
@@ -644,7 +781,10 @@ minimum_pre_commit_version: "not.a.version.format!"
 "#;
         let result = Config::from_yaml(yaml);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not a valid version format"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("not a valid version format"));
     }
 
     #[test]
@@ -676,7 +816,10 @@ default_install_hook_types: [pre-commit, invalid-hook-type]
 "#;
         let result = Config::from_yaml(yaml);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid hook type"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid hook type"));
     }
 
     #[test]
@@ -707,7 +850,8 @@ default_language_version:
         ];
 
         for version in valid_versions {
-            let yaml = format!(r#"
+            let yaml = format!(
+                r#"
 repos:
 - repo: https://github.com/test/test
   rev: v1.0.0
@@ -715,10 +859,11 @@ repos:
   - id: test-hook
     entry: test
     language: python
-minimum_pre_commit_version: "{}"
-"#, version);
+minimum_pre_commit_version: "{version}"
+"#
+            );
             let result = Config::from_yaml(&yaml);
-            assert!(result.is_ok(), "Version {} should be valid", version);
+            assert!(result.is_ok(), "Version {version} should be valid");
         }
     }
 }

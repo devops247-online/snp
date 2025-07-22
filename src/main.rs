@@ -26,6 +26,6 @@ mod tests {
     fn test_main_compiles() {
         // This test just ensures main function compiles
         // Actual functionality is tested via integration tests
-        assert!(true);
+        // No assertion needed - compilation success is the test
     }
 }

@@ -3,9 +3,11 @@
 
 pub mod cli;
 pub mod config;
+pub mod core;
 pub mod error;
 
 // Re-export main types for easier access
+pub use core::{ExecutionContext, FileFilter, Hook, Repository, Stage};
 pub use error::{Result, SnpError};
 
 // Version information
@@ -29,7 +31,7 @@ mod tests {
 
     #[test]
     fn test_description_exists() {
-        assert!(!DESCRIPTION.is_empty());
+        // DESCRIPTION is a const string that's never empty
         assert!(DESCRIPTION.contains("Shell Not Pass"));
     }
 }

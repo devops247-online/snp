@@ -79,7 +79,7 @@ fn test_cli_structure_completeness() {
     // Verify that all main commands are available
     // This test will guide our CLI implementation
     let mut cmd = Command::cargo_bin("snp").unwrap();
-    cmd.args(&["--help"]);
+    cmd.args(["--help"]);
 
     let output = cmd.assert().success().get_output().stdout.clone();
     let help_text = String::from_utf8(output).unwrap();
@@ -99,8 +99,7 @@ fn test_cli_structure_completeness() {
     for command in expected_commands {
         assert!(
             help_text.contains(command),
-            "Help text should mention '{}' command",
-            command
+            "Help text should mention '{command}' command"
         );
     }
 }
@@ -109,8 +108,8 @@ fn test_cli_structure_completeness() {
 fn test_shell_completion_command() {
     // Test that shell completion command exists and works
     let mut cmd = Command::cargo_bin("snp").unwrap();
-    cmd.args(&["generate-completion", "bash"]);
-    
+    cmd.args(["generate-completion", "bash"]);
+
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("complete"));
@@ -120,30 +119,30 @@ fn test_shell_completion_command() {
 fn test_conflicting_verbose_quiet_flags() {
     // Test that conflicting --verbose and --quiet flags show error
     let mut cmd = Command::cargo_bin("snp").unwrap();
-    cmd.args(&["--verbose", "--quiet", "run"]);
-    
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("Cannot specify both --verbose and --quiet"));
+    cmd.args(["--verbose", "--quiet", "run"]);
+
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "Cannot specify both --verbose and --quiet",
+    ));
 }
 
 #[test]
 fn test_conflicting_run_options() {
     // Test that conflicting --all-files and --files show error
     let mut cmd = Command::cargo_bin("snp").unwrap();
-    cmd.args(&["run", "--all-files", "--files", "test.py"]);
-    
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("Cannot specify both --all-files and --files"));
+    cmd.args(["run", "--all-files", "--files", "test.py"]);
+
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "Cannot specify both --all-files and --files",
+    ));
 }
 
 #[test]
 fn test_run_with_specific_hook() {
     // Test running a specific hook
     let mut cmd = Command::cargo_bin("snp").unwrap();
-    cmd.args(&["run", "--hook", "black"]);
-    
+    cmd.args(["run", "--hook", "black"]);
+
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("Running hook: black"));
@@ -153,8 +152,8 @@ fn test_run_with_specific_hook() {
 fn test_run_all_files() {
     // Test running on all files
     let mut cmd = Command::cargo_bin("snp").unwrap();
-    cmd.args(&["run", "--all-files"]);
-    
+    cmd.args(["run", "--all-files"]);
+
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("Running hooks on all files"));
@@ -164,19 +163,19 @@ fn test_run_all_files() {
 fn test_run_specific_files() {
     // Test running on specific files
     let mut cmd = Command::cargo_bin("snp").unwrap();
-    cmd.args(&["run", "--files", "file1.py", "file2.rs"]);
-    
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("Running hooks on 2 specific files"));
+    cmd.args(["run", "--files", "file1.py", "file2.rs"]);
+
+    cmd.assert().success().stdout(predicate::str::contains(
+        "Running hooks on 2 specific files",
+    ));
 }
 
 #[test]
 fn test_config_file_option() {
     // Test custom config file option
     let mut cmd = Command::cargo_bin("snp").unwrap();
-    cmd.args(&["--config", "custom-config.yaml", "run"]);
-    
+    cmd.args(["--config", "custom-config.yaml", "run"]);
+
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("Running hooks"));
@@ -186,8 +185,8 @@ fn test_config_file_option() {
 fn test_verbose_flag() {
     // Test verbose flag works
     let mut cmd = Command::cargo_bin("snp").unwrap();
-    cmd.args(&["--verbose", "run"]);
-    
+    cmd.args(["--verbose", "run"]);
+
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("Running hooks"));
@@ -197,8 +196,14 @@ fn test_verbose_flag() {
 fn test_install_with_hook_types() {
     // Test install command with hook types
     let mut cmd = Command::cargo_bin("snp").unwrap();
-    cmd.args(&["install", "--hook-type", "pre-commit", "--hook-type", "pre-push"]);
-    
+    cmd.args([
+        "install",
+        "--hook-type",
+        "pre-commit",
+        "--hook-type",
+        "pre-push",
+    ]);
+
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("Installing pre-commit hooks"));
@@ -208,8 +213,7 @@ fn test_install_with_hook_types() {
 fn test_autoupdate_with_options() {
     // Test autoupdate command with various options
     let mut cmd = Command::cargo_bin("snp").unwrap();
-    cmd.args(&["autoupdate", "--bleeding-edge", "--jobs", "4"]);
-    
-    cmd.assert()
-        .success();
+    cmd.args(["autoupdate", "--bleeding-edge", "--jobs", "4"]);
+
+    cmd.assert().success();
 }
