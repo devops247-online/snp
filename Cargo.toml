@@ -16,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 # CLI framework
 clap = { version = "4.4", features = ["derive", "color", "suggestions"] }
+clap_complete = "4.4"
 
 # Serialization and configuration
 serde = { version = "1.0", features = ["derive"] }
@@ -48,6 +49,7 @@ which = "5.0"
 assert_cmd = "2.0"
 predicates = "3.0"
 tempfile = "3.8"
+criterion = { version = "0.5", features = ["html_reports"] }
 
 [profile.release]
 strip = true
@@ -57,3 +59,7 @@ panic = "abort"
 
 [profile.dev]
 debug = true
+
+[[bench]]
+name = "cli_benchmark"
+harness = false

@@ -1,5 +1,6 @@
 // CLI interface for SNP using clap
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 
 use crate::error::Result;
 
@@ -32,6 +33,7 @@ pub enum Commands {
     /// Run hooks (default command)
     Run {
         /// Hook ID to run
+        #[arg(long)]
         hook: Option<String>,
 
         /// Run on all files in the repository
@@ -39,7 +41,7 @@ pub enum Commands {
         all_files: bool,
 
         /// Specific filenames to run hooks on
-        #[arg(long)]
+        #[arg(long, num_args = 1..)]
         files: Vec<String>,
 
         /// Show git diff when hooks fail
@@ -154,16 +156,44 @@ pub enum Commands {
 
     /// Produce a sample .pre-commit-config.yaml file
     SampleConfig,
+    
+    /// Generate shell completion scripts
+    GenerateCompletion {
+        /// Shell to generate completion for
+        shell: Shell,
+    },
 }
 
 impl Cli {
     pub fn run(&self) -> Result<i32> {
         // Initialize logging based on verbosity
         self.init_logging();
+        
+        // Validate conflicting flags
+        if self.verbose && self.quiet {
+            return Err(crate::error::SnpError::Cli(
+                "Cannot specify both --verbose and --quiet flags".to_string()
+            ));
+        }
 
         match &self.command {
-            Some(Commands::Run { .. }) => {
-                println!("Running hooks...");
+            Some(Commands::Run { hook, all_files, files, .. }) => {
+                // Validate run command arguments
+                if *all_files && !files.is_empty() {
+                    return Err(crate::error::SnpError::Cli(
+                        "Cannot specify both --all-files and --files options".to_string()
+                    ));
+                }
+                
+                if let Some(hook_id) = hook {
+                    println!("Running hook: {hook_id}");
+                } else if *all_files {
+                    println!("Running hooks on all files");
+                } else if !files.is_empty() {
+                    println!("Running hooks on {} specific files", files.len());
+                } else {
+                    println!("Running hooks on staged files");
+                }
                 // TODO: Implement run command
                 Ok(0)
             }
@@ -175,6 +205,12 @@ impl Cli {
             Some(Commands::Clean) => {
                 println!("Cleaning pre-commit files...");
                 // TODO: Implement clean command
+                Ok(0)
+            }
+            Some(Commands::GenerateCompletion { shell }) => {
+                let mut cmd = Self::command();
+                let name = cmd.get_name().to_string();
+                generate(*shell, &mut cmd, name, &mut std::io::stdout());
                 Ok(0)
             }
             // TODO: Implement all other commands
