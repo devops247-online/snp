@@ -63,3 +63,7 @@ debug = true
 [[bench]]
 name = "cli_benchmark"
 harness = false
+
+[[bench]]
+name = "config_benchmark"
+harness = false
