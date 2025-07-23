@@ -479,28 +479,50 @@ impl PythonLanguagePlugin {
         python_info: &PythonInfo,
         env_path: &Path,
     ) -> Result<PathBuf> {
-        let output = TokioCommand::new(&python_info.executable_path)
-            .args(["-m", "venv", env_path.to_str().unwrap()])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await?;
+        // Retry mechanism for CI environments where transient failures can occur
+        const MAX_RETRIES: u32 = 3;
+        let mut last_error = None;
 
-        if !output.status.success() {
-            return Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
+        for attempt in 1..=MAX_RETRIES {
+            let output = TokioCommand::new(&python_info.executable_path)
+                .args(["-m", "venv", env_path.to_str().unwrap()])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()
+                .await?;
+
+            if output.status.success() {
+                // Ensure pip is available in the virtual environment
+                match self.ensure_pip_in_environment(env_path).await {
+                    Ok(_) => return Ok(env_path.to_path_buf()),
+                    Err(e) if attempt < MAX_RETRIES => {
+                        last_error = Some(e);
+                        // Clean up failed environment before retry
+                        let _ = tokio::fs::remove_dir_all(env_path).await;
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+
+            let error_msg = String::from_utf8_lossy(&output.stderr);
+            last_error = Some(SnpError::from(LanguageError::EnvironmentSetupFailed {
                 language: "python".to_string(),
                 error: format!(
-                    "venv creation failed: {}",
-                    String::from_utf8_lossy(&output.stderr)
+                    "venv creation failed (attempt {attempt}/{MAX_RETRIES}): {error_msg}"
                 ),
                 recovery_suggestion: Some("Check Python installation and permissions".to_string()),
             }));
+
+            if attempt < MAX_RETRIES {
+                // Clean up failed environment before retry
+                let _ = tokio::fs::remove_dir_all(env_path).await;
+                // Small delay before retry
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
         }
 
-        // Ensure pip is available in the virtual environment
-        self.ensure_pip_in_environment(env_path).await?;
-
-        Ok(env_path.to_path_buf())
+        Err(last_error.unwrap())
     }
 
     /// Ensure pip is available in the virtual environment
