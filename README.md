@@ -1,7 +1,7 @@
 # SNP (Shell Not Pass)
 
-[![CI](https://github.com/devops247-online/snp/workflows/CI/badge.svg)](https://github.com/devops247-online/snp/actions)
-[![codecov](https://codecov.io/gh/devops247-online/snp/branch/main/graph/badge.svg)](https://codecov.io/gh/devops247-online/snp)
+[![CI](https://github.com/devops247-online/snp/actions/workflows/ci.yml/badge.svg)](https://github.com/devops247-online/snp/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/devops247-online/snp/graph/badge.svg)](https://codecov.io/gh/devops247-online/snp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Crates.io](https://img.shields.io/crates/v/snp.svg)](https://crates.io/crates/snp)
 
