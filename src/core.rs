@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::error::{ConfigError, Result, SnpError};
+use crate::filesystem::FileFilter;
 
 /// Represents the different stages where hooks can be executed
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -181,94 +182,6 @@ impl Repository {
     }
 }
 
-/// File filter for matching files against patterns
-#[derive(Debug, Clone)]
-pub struct FileFilter {
-    pub files_pattern: Option<Regex>,
-    pub exclude_pattern: Option<Regex>,
-    pub types: Vec<String>,
-    pub exclude_types: Vec<String>,
-}
-
-impl FileFilter {
-    /// Create a new file filter
-    pub fn new() -> Self {
-        Self {
-            files_pattern: None,
-            exclude_pattern: None,
-            types: Vec::new(),
-            exclude_types: Vec::new(),
-        }
-    }
-
-    /// Set the files pattern
-    pub fn with_files_pattern(mut self, pattern: &str) -> Result<Self> {
-        self.files_pattern = Some(Regex::new(pattern).map_err(|e| {
-            SnpError::Config(Box::new(ConfigError::InvalidRegex {
-                pattern: pattern.to_string(),
-                field: "files".to_string(),
-                error: e.to_string(),
-                file_path: None,
-                line: None,
-            }))
-        })?);
-        Ok(self)
-    }
-
-    /// Set the exclude pattern
-    pub fn with_exclude_pattern(mut self, pattern: &str) -> Result<Self> {
-        self.exclude_pattern = Some(Regex::new(pattern).map_err(|e| {
-            SnpError::Config(Box::new(ConfigError::InvalidRegex {
-                pattern: pattern.to_string(),
-                field: "exclude".to_string(),
-                error: e.to_string(),
-                file_path: None,
-                line: None,
-            }))
-        })?);
-        Ok(self)
-    }
-
-    /// Add file types
-    pub fn with_types(mut self, types: Vec<String>) -> Self {
-        self.types = types;
-        self
-    }
-
-    /// Add exclude types
-    pub fn with_exclude_types(mut self, exclude_types: Vec<String>) -> Self {
-        self.exclude_types = exclude_types;
-        self
-    }
-
-    /// Check if a file matches this filter
-    pub fn matches(&self, file_path: &str) -> bool {
-        // Check exclude pattern first
-        if let Some(ref exclude) = self.exclude_pattern {
-            if exclude.is_match(file_path) {
-                return false;
-            }
-        }
-
-        // Check files pattern
-        if let Some(ref files) = self.files_pattern {
-            if !files.is_match(file_path) {
-                return false;
-            }
-        }
-
-        // TODO: Implement type-based filtering
-        // For now, if no patterns are set, match everything
-        true
-    }
-}
-
-impl Default for FileFilter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// Enhanced Hook structure with runtime capabilities
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Hook {
@@ -440,16 +353,19 @@ impl Hook {
     pub fn file_filter(&self) -> Result<FileFilter> {
         let mut filter = FileFilter::new();
 
+        // Add include patterns if specified
         if let Some(ref files) = self.files {
-            filter = filter.with_files_pattern(files)?;
+            filter = filter.with_include_patterns(vec![files.clone()])?;
         }
 
+        // Add exclude patterns if specified
         if let Some(ref exclude) = self.exclude {
-            filter = filter.with_exclude_pattern(exclude)?;
+            filter = filter.with_exclude_patterns(vec![exclude.clone()])?;
         }
 
+        // Add file types and exclude types
         filter = filter
-            .with_types(self.types.clone())
+            .with_file_types(self.types.clone())
             .with_exclude_types(self.exclude_types.clone());
 
         Ok(filter)
@@ -544,23 +460,14 @@ impl ExecutionContext {
         }
 
         let filter = hook.file_filter()?;
-        let filtered: Vec<PathBuf> = self
-            .files
-            .iter()
-            .filter(|path| {
-                let path_str = path.to_string_lossy();
-                filter.matches(&path_str)
-            })
-            .cloned()
-            .collect();
-
-        Ok(filtered)
+        filter.filter_files(&self.files)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn test_stage_conversion() {
@@ -615,21 +522,32 @@ mod tests {
 
     #[test]
     fn test_file_filter_creation() {
+        // Test only pattern matching without file type detection
         let filter = FileFilter::new()
-            .with_files_pattern(r"\.py$")
+            .with_include_patterns(vec![r"\.py$".to_string()])
             .unwrap()
-            .with_exclude_pattern(r"test_.*\.py$")
-            .unwrap()
-            .with_types(vec!["python".to_string()]);
+            .with_exclude_patterns(vec![r"test_.*\.py$".to_string()])
+            .unwrap();
 
-        assert!(filter.matches("script.py"));
-        assert!(!filter.matches("test_script.py"));
-        assert!(!filter.matches("script.js"));
+        // Create temporary files for testing
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let script_py = temp_dir.path().join("script.py");
+        let test_py = temp_dir.path().join("test_script.py");
+        let script_js = temp_dir.path().join("script.js");
+
+        // Create the test files
+        std::fs::write(&script_py, "print('hello')").unwrap();
+        std::fs::write(&test_py, "print('test')").unwrap();
+        std::fs::write(&script_js, "console.log('hello')").unwrap();
+
+        assert!(filter.matches(&script_py).unwrap());
+        assert!(!filter.matches(&test_py).unwrap());
+        assert!(!filter.matches(&script_js).unwrap());
     }
 
     #[test]
     fn test_file_filter_invalid_regex() {
-        let result = FileFilter::new().with_files_pattern("[invalid");
+        let result = FileFilter::new().with_include_patterns(vec!["[invalid".to_string()]);
         assert!(result.is_err());
     }
 
@@ -699,8 +617,8 @@ mod tests {
             .with_exclude(r"test_.*\.py$".to_string());
 
         let filter = hook.file_filter().unwrap();
-        assert!(filter.matches("script.py"));
-        assert!(!filter.matches("test_script.py"));
+        assert!(filter.matches(Path::new("script.py")).unwrap());
+        assert!(!filter.matches(Path::new("test_script.py")).unwrap());
     }
 
     #[test]
@@ -822,17 +740,17 @@ mod tests {
     #[test]
     fn test_file_filter_complex_patterns() {
         let filter = FileFilter::new()
-            .with_files_pattern(r"\.(py|rs|js)$")
+            .with_include_patterns(vec![r"\.(py|rs|js)$".to_string()])
             .unwrap()
-            .with_exclude_pattern(r"(test_|__pycache__|target/)")
+            .with_exclude_patterns(vec![r"(test_|__pycache__|target/)".to_string()])
             .unwrap();
 
-        assert!(filter.matches("script.py"));
-        assert!(filter.matches("main.rs"));
-        assert!(filter.matches("app.js"));
-        assert!(!filter.matches("test_script.py"));
-        assert!(!filter.matches("__pycache__/module.py"));
-        assert!(!filter.matches("target/debug/app"));
+        assert!(filter.matches(Path::new("script.py")).unwrap());
+        assert!(filter.matches(Path::new("main.rs")).unwrap());
+        assert!(filter.matches(Path::new("app.js")).unwrap());
+        assert!(!filter.matches(Path::new("test_script.py")).unwrap());
+        assert!(!filter.matches(Path::new("__pycache__/module.py")).unwrap());
+        assert!(!filter.matches(Path::new("target/debug/app")).unwrap());
     }
 
     #[test]
@@ -1047,14 +965,16 @@ mod tests {
     fn test_file_filter_edge_cases() {
         // Empty patterns should match everything
         let filter = FileFilter::new();
-        assert!(filter.matches("any-file.txt"));
-        assert!(filter.matches(""));
-        assert!(filter.matches("path/to/file.ext"));
+        assert!(filter.matches(Path::new("any-file.txt")).unwrap());
+        assert!(filter.matches(Path::new("")).unwrap());
+        assert!(filter.matches(Path::new("path/to/file.ext")).unwrap());
 
         // Only exclude pattern
-        let filter = FileFilter::new().with_exclude_pattern(r"\.tmp$").unwrap();
-        assert!(filter.matches("file.txt"));
-        assert!(!filter.matches("file.tmp"));
+        let filter = FileFilter::new()
+            .with_exclude_patterns(vec![r"\.tmp$".to_string()])
+            .unwrap();
+        assert!(filter.matches(Path::new("file.txt")).unwrap());
+        assert!(!filter.matches(Path::new("file.tmp")).unwrap());
     }
 
     #[test]
@@ -1117,14 +1037,18 @@ mod tests {
     #[test]
     fn test_file_filter_complex_exclude_patterns() {
         let filter = FileFilter::new()
-            .with_exclude_pattern(r"(\.git/|__pycache__/|\.pytest_cache/|target/debug/)")
+            .with_exclude_patterns(vec![
+                r"(\.git/|__pycache__/|\.pytest_cache/|target/debug/)".to_string()
+            ])
             .unwrap();
 
-        assert!(!filter.matches(".git/config"));
-        assert!(!filter.matches("__pycache__/module.pyc"));
-        assert!(!filter.matches(".pytest_cache/readme.md"));
-        assert!(!filter.matches("target/debug/binary"));
-        assert!(filter.matches("src/main.rs"));
+        assert!(!filter.matches(Path::new(".git/config")).unwrap());
+        assert!(!filter.matches(Path::new("__pycache__/module.pyc")).unwrap());
+        assert!(!filter
+            .matches(Path::new(".pytest_cache/readme.md"))
+            .unwrap());
+        assert!(!filter.matches(Path::new("target/debug/binary")).unwrap());
+        assert!(filter.matches(Path::new("src/main.rs")).unwrap());
     }
 
     #[test]
@@ -1204,15 +1128,15 @@ mod tests {
         let filter = hook.file_filter().unwrap();
 
         // Should match Rust and Python files
-        assert!(filter.matches("main.rs"));
-        assert!(filter.matches("script.py"));
+        assert!(filter.matches(Path::new("main.rs")).unwrap());
+        assert!(filter.matches(Path::new("script.py")).unwrap());
 
         // Should not match test files
-        assert!(!filter.matches("test_main.rs"));
-        assert!(!filter.matches("test_script.py"));
+        assert!(!filter.matches(Path::new("test_main.rs")).unwrap());
+        assert!(!filter.matches(Path::new("test_script.py")).unwrap());
 
         // Should not match other file types
-        assert!(!filter.matches("config.toml"));
-        assert!(!filter.matches("README.md"));
+        assert!(!filter.matches(Path::new("config.toml")).unwrap());
+        assert!(!filter.matches(Path::new("README.md")).unwrap());
     }
 }

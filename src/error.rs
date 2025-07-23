@@ -72,6 +72,12 @@ pub enum ConfigError {
         file_path: Option<PathBuf>,
         line: Option<u32>,
     },
+
+    #[error("IO operation failed: {message}")]
+    IOError {
+        message: String,
+        path: Option<PathBuf>,
+    },
 }
 
 /// Git operation errors with context
