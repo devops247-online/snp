@@ -73,7 +73,7 @@ notify = "6.1"
 rusqlite = { version = "0.31", features = ["bundled"] }
 
 # Schema validation dependencies
-validator = "0.16"
+validator = "0.20"
 jsonschema = "0.17"
 ahash = "0.8"
 once_cell = "1.19"
