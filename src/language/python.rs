@@ -492,7 +492,62 @@ impl PythonLanguagePlugin {
             }));
         }
 
+        // Ensure pip is available in the virtual environment
+        self.ensure_pip_in_environment(env_path).await?;
+
         Ok(env_path.to_path_buf())
+    }
+
+    /// Ensure pip is available in the virtual environment
+    async fn ensure_pip_in_environment(&self, env_path: &Path) -> Result<()> {
+        let pip_exe = if cfg!(windows) {
+            env_path.join("Scripts").join("pip.exe")
+        } else {
+            env_path.join("bin").join("pip")
+        };
+
+        // If pip already exists, we're good
+        if pip_exe.exists() {
+            return Ok(());
+        }
+
+        // Get the Python executable in the venv
+        let python_exe = if cfg!(windows) {
+            env_path.join("Scripts").join("python.exe")
+        } else {
+            env_path.join("bin").join("python")
+        };
+
+        if !python_exe.exists() {
+            return Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
+                language: "python".to_string(),
+                error: "Python executable not found in virtual environment".to_string(),
+                recovery_suggestion: Some("Recreate virtual environment".to_string()),
+            }));
+        }
+
+        // Install pip using ensurepip module
+        let output = TokioCommand::new(&python_exe)
+            .args(["-m", "ensurepip", "--upgrade"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            return Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
+                language: "python".to_string(),
+                error: format!(
+                    "Failed to install pip: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+                recovery_suggestion: Some(
+                    "Install pip manually in virtual environment".to_string(),
+                ),
+            }));
+        }
+
+        Ok(())
     }
 
     /// Create virtual environment using virtualenv
@@ -522,6 +577,9 @@ impl PythonLanguagePlugin {
                 recovery_suggestion: Some("Install virtualenv package".to_string()),
             }));
         }
+
+        // Ensure pip is available in the virtual environment
+        self.ensure_pip_in_environment(env_path).await?;
 
         Ok(env_path.to_path_buf())
     }
