@@ -127,7 +127,6 @@ async fn test_install_specific_hook_types() {
     let (_temp_dir, repo_path) = create_test_git_repo();
     create_snp_config(&repo_path);
 
-
     let git_repo = GitRepository::discover_from_path(&repo_path).unwrap();
     let hook_manager = snp::install::GitHookManager::new(git_repo);
 
@@ -192,7 +191,6 @@ async fn test_install_missing_config() {
     let (_temp_dir, repo_path) = create_test_git_repo();
     // Note: No config file created
 
-
     let git_repo = GitRepository::discover_from_path(&repo_path).unwrap();
     let hook_manager = snp::install::GitHookManager::new(git_repo);
 
@@ -216,7 +214,6 @@ async fn test_install_missing_config() {
 async fn test_install_missing_config_not_allowed() {
     let (_temp_dir, repo_path) = create_test_git_repo();
     // Note: No config file created
-
 
     let git_repo = GitRepository::discover_from_path(&repo_path).unwrap();
     let hook_manager = snp::install::GitHookManager::new(git_repo);
@@ -282,7 +279,6 @@ async fn test_uninstall_specific_hook_types() {
     let (_temp_dir, repo_path) = create_test_git_repo();
     create_snp_config(&repo_path);
 
-
     // Create multiple SNP hooks
     let hooks_dir = repo_path.join(".git/hooks");
     fs::create_dir_all(&hooks_dir).unwrap();
@@ -319,7 +315,6 @@ async fn test_uninstall_specific_hook_types() {
 async fn test_uninstall_clean_removal() {
     let (_temp_dir, repo_path) = create_test_git_repo();
     create_snp_config(&repo_path);
-
 
     // Create SNP hook without backup
     let hooks_dir = repo_path.join(".git/hooks");
@@ -442,7 +437,6 @@ async fn test_hook_permissions_unix() {
     let (_temp_dir, repo_path) = create_test_git_repo();
     create_snp_config(&repo_path);
 
-
     let git_repo = GitRepository::discover_from_path(&repo_path).unwrap();
     let hook_manager = snp::install::GitHookManager::new(git_repo);
 
@@ -516,7 +510,6 @@ async fn test_install_permission_denied() {
     let (_temp_dir, repo_path) = create_test_git_repo();
     create_snp_config(&repo_path);
 
-
     // Make hooks directory read-only
     let hooks_dir = repo_path.join(".git/hooks");
     fs::create_dir_all(&hooks_dir).unwrap();
@@ -534,10 +527,10 @@ async fn test_install_permission_denied() {
     };
 
     let result = hook_manager.install_hooks(&install_config).await;
-    
+
     // Restore permissions for cleanup first (important for test cleanup)
     fs::set_permissions(&hooks_dir, fs::Permissions::from_mode(0o755)).unwrap();
-    
+
     // The result should be an error due to permission denied
     // However, implementation may handle permissions differently
     if result.is_ok() {
@@ -550,7 +543,6 @@ async fn test_install_permission_denied() {
 async fn test_uninstall_no_hooks_installed() {
     let (_temp_dir, repo_path) = create_test_git_repo();
     create_snp_config(&repo_path);
-
 
     let git_repo = GitRepository::discover_from_path(&repo_path).unwrap();
     let hook_manager = snp::install::GitHookManager::new(git_repo);
@@ -590,7 +582,6 @@ async fn test_corrupted_backup_handling() {
 async fn test_install_uninstall_roundtrip() {
     let (_temp_dir, repo_path) = create_test_git_repo();
     create_snp_config(&repo_path);
-
 
     // Create original hook
     let hooks_dir = repo_path.join(".git/hooks");
@@ -639,7 +630,6 @@ async fn test_multiple_install_calls() {
     let (_temp_dir, repo_path) = create_test_git_repo();
     create_snp_config(&repo_path);
 
-
     let git_repo = GitRepository::discover_from_path(&repo_path).unwrap();
     let hook_manager = snp::install::GitHookManager::new(git_repo);
 
@@ -673,7 +663,7 @@ fn test_cli_install_command() {
     // Test CLI parsing instead of running (to avoid runtime conflicts)
     let cli_args = vec!["snp", "install", "--hook-type", "pre-commit"];
     let cli = Cli::try_parse_from(cli_args).unwrap();
-    
+
     // Verify CLI parsing worked correctly
     match cli.command {
         Some(snp::cli::Commands::Install { hook_type, .. }) => {
@@ -688,7 +678,7 @@ fn test_cli_uninstall_command() {
     // Test CLI parsing instead of running (to avoid runtime conflicts)
     let uninstall_args = vec!["snp", "uninstall", "--hook-type", "pre-commit"];
     let uninstall_cli = Cli::try_parse_from(uninstall_args).unwrap();
-    
+
     // Verify CLI parsing worked correctly
     match uninstall_cli.command {
         Some(snp::cli::Commands::Uninstall { hook_type, .. }) => {
@@ -704,7 +694,6 @@ fn test_cli_uninstall_command() {
 async fn test_installation_performance() {
     let (_temp_dir, repo_path) = create_test_git_repo();
     create_snp_config(&repo_path);
-
 
     let git_repo = GitRepository::discover_from_path(&repo_path).unwrap();
     let hook_manager = snp::install::GitHookManager::new(git_repo);

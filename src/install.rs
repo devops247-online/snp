@@ -791,7 +791,7 @@ else
 fi
 
 # Run SNP with the appropriate hook stage
-exec "$SNP_BIN" run --hook-stage="{hook_stage}" {args} "$@"
+exec "$SNP_BIN" run --hook-stage="{hook_stage}" {args}
 "#;
 
         // Create templates for each hook type
