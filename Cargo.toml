@@ -35,13 +35,16 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 
 # Git operations
-git2 = "0.18"
+git2 = { version = "0.18", features = ["vendored-openssl"] }
 
 # File system and utilities
 regex = "1.10"
 regex-syntax = "0.8"
 walkdir = "2.4"
 tempfile = "3.8"
+ignore = "0.4"
+memmap2 = "0.9"
+similar = "2.3"
 
 # Regex processing dependencies
 aho-corasick = "1.1"
