@@ -5,6 +5,7 @@ pub mod cli;
 pub mod config;
 pub mod core;
 pub mod error;
+pub mod git;
 pub mod logging;
 
 // Re-export main types for easier access
@@ -13,6 +14,7 @@ pub use core::{ExecutionContext, FileFilter, Hook, Repository, Stage};
 pub use error::{
     exit_codes, CliError, ConfigError, GitError, HookExecutionError, Result, SnpError,
 };
+pub use git::GitRepository;
 pub use logging::{ColorConfig, LogConfig, LogFormat};
 
 // Version information

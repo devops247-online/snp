@@ -395,6 +395,26 @@ impl From<serde_yaml::Error> for Box<ConfigError> {
     }
 }
 
+// Conversion from git2::Error to GitError
+impl From<git2::Error> for Box<GitError> {
+    fn from(error: git2::Error) -> Self {
+        Box::new(GitError::CommandFailed {
+            command: "git2 operation".to_string(),
+            exit_code: None,
+            stdout: String::new(),
+            stderr: error.message().to_string(),
+            working_dir: None,
+        })
+    }
+}
+
+// Direct conversion from git2::Error to SnpError
+impl From<git2::Error> for SnpError {
+    fn from(error: git2::Error) -> Self {
+        SnpError::Git(Box::<GitError>::from(error))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
