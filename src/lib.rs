@@ -12,6 +12,7 @@ pub mod filesystem;
 pub mod git;
 pub mod logging;
 pub mod process;
+pub mod regex_processor;
 pub mod storage;
 pub mod validation;
 
@@ -39,6 +40,10 @@ pub use git::GitRepository;
 pub use logging::{ColorConfig, LogConfig, LogFormat};
 pub use process::{
     OutputHandler, ProcessConfig, ProcessEnvironment, ProcessManager, ProcessResult,
+};
+pub use regex_processor::{
+    BatchRegexProcessor, CompiledRegex, MatchMatrix, PatternAnalysis, PatternAnalyzer,
+    PatternIssue, PerformanceClass, RegexConfig, RegexError, RegexProcessor, SecurityWarning,
 };
 pub use storage::{ConfigInfo, EnvironmentInfo, RepositoryInfo, Store};
 pub use validation::{

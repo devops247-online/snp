@@ -33,6 +33,9 @@ pub enum SnpError {
 
     #[error("File classification failed: {0}")]
     Classification(crate::classification::ClassificationError),
+
+    #[error("Regex processing failed: {0}")]
+    Regex(#[from] Box<crate::regex_processor::RegexError>),
 }
 
 /// Configuration-related errors with detailed context
@@ -452,6 +455,9 @@ impl ErrorFormatter {
             SnpError::Classification(_) => {
                 error!(error_type = "classification", error = %error, "File classification failed");
             }
+            SnpError::Regex(_) => {
+                error!(error_type = "regex", error = %error, "Regex processing failed");
+            }
         }
 
         let mut output = String::new();
@@ -492,6 +498,9 @@ impl ErrorFormatter {
             }
             SnpError::Classification(classification_err) => {
                 self.add_classification_context(&mut output, classification_err);
+            }
+            SnpError::Regex(regex_err) => {
+                self.add_regex_context(&mut output, regex_err.as_ref());
             }
             _ => {}
         }
@@ -709,6 +718,51 @@ impl ErrorFormatter {
             }
         }
     }
+
+    fn add_regex_context(&self, output: &mut String, error: &crate::regex_processor::RegexError) {
+        output.push('\n');
+        match error {
+            crate::regex_processor::RegexError::InvalidPattern {
+                pattern,
+                suggestion,
+                ..
+            } => {
+                output.push_str(&format!("  Pattern: {pattern}"));
+                if let Some(suggestion) = suggestion {
+                    output.push_str(&format!("\n  Help: {suggestion}"));
+                }
+            }
+            crate::regex_processor::RegexError::ComplexityExceeded {
+                pattern,
+                complexity_score,
+                ..
+            } => {
+                output.push_str(&format!("  Pattern: {pattern}"));
+                output.push_str(&format!("\n  Complexity score: {complexity_score:.2}"));
+            }
+            crate::regex_processor::RegexError::SecurityViolation {
+                pattern,
+                vulnerability_type,
+                ..
+            } => {
+                output.push_str(&format!("  Pattern: {pattern}"));
+                output.push_str(&format!("\n  Security issue: {vulnerability_type}"));
+            }
+            crate::regex_processor::RegexError::CompilationTimeout {
+                pattern, duration, ..
+            } => {
+                output.push_str(&format!("  Pattern: {pattern}"));
+                output.push_str(&format!("\n  Compilation time: {duration:?}"));
+            }
+            crate::regex_processor::RegexError::CacheOverflow {
+                current_size,
+                max_size,
+                ..
+            } => {
+                output.push_str(&format!("  Cache size: {current_size}/{max_size}"));
+            }
+        }
+    }
 }
 
 /// Exit codes matching pre-commit behavior
@@ -758,6 +812,7 @@ impl SnpError {
                 _ => exit_codes::LOCK_ERROR,
             },
             SnpError::Classification(_) => exit_codes::GENERAL_ERROR,
+            SnpError::Regex(_) => exit_codes::GENERAL_ERROR,
             SnpError::Io(_) => exit_codes::GENERAL_ERROR,
         }
     }
