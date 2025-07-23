@@ -11,6 +11,7 @@ pub mod file_lock;
 pub mod filesystem;
 pub mod git;
 pub mod logging;
+pub mod migration;
 pub mod process;
 pub mod regex_processor;
 pub mod storage;
@@ -44,6 +45,12 @@ pub use process::{
 pub use regex_processor::{
     BatchRegexProcessor, CompiledRegex, MatchMatrix, PatternAnalysis, PatternAnalyzer,
     PatternIssue, PerformanceClass, RegexConfig, RegexError, RegexProcessor, SecurityWarning,
+};
+pub use migration::{
+    AppliedMigration, ConfigFormat, ConfigMigrator, FieldMigration, FieldTransformation,
+    MigrationComplexity, MigrationConfig, MigrationError, MigrationPlan, MigrationResult, 
+    MigrationRule, MigrationWarning, RepositoryMigrationResult, StructuralChange, 
+    StructuralChangeType, TransformationType,
 };
 pub use storage::{ConfigInfo, EnvironmentInfo, RepositoryInfo, Store};
 pub use validation::{
