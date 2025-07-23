@@ -13,6 +13,7 @@ pub mod filesystem;
 pub mod git;
 pub mod logging;
 pub mod migration;
+pub mod output;
 pub mod process;
 pub mod regex_processor;
 pub mod storage;
@@ -46,6 +47,14 @@ pub use migration::{
     MigrationComplexity, MigrationConfig, MigrationError, MigrationPlan, MigrationResult,
     MigrationRule, MigrationWarning, RepositoryMigrationResult, StructuralChange,
     StructuralChangeType, TransformationType,
+};
+pub use output::{
+    AggregatedOutput, BufferEntry, CacheStatistics, CollectedOutput, ColorMode, ExecutionSummary,
+    GitHubFormatter, HumanFormatter, JsonFormatter, JunitFormatter, OutputAggregator, OutputBuffer,
+    OutputCollector, OutputConfig, OutputFormat, OutputStream, OutputWriter,
+    PerformanceMetrics as OutputPerformanceMetrics, ProgressConfig, ProgressRenderer,
+    ProgressReporter, ProgressState, ResourceUsageMetrics, ResultFormatter, StdoutWriter,
+    TapFormatter, TeamCityFormatter, TerminalProgressRenderer, ThroughputMetrics, VerbosityLevel,
 };
 pub use process::{
     OutputHandler, ProcessConfig, ProcessEnvironment, ProcessManager, ProcessResult,
