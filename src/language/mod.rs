@@ -5,6 +5,7 @@ pub mod base;
 pub mod dependency;
 pub mod environment;
 pub mod executor;
+pub mod python;
 pub mod registry;
 pub mod system;
 pub mod traits;
@@ -20,6 +21,7 @@ pub use environment::{
     IsolationLevel, LanguageEnvironment, ValidationIssue, ValidationReport,
 };
 pub use executor::{ExecutionCache, LanguageHookExecutor};
+pub use python::PythonLanguagePlugin;
 pub use registry::{LanguageRegistry, PluginMetadata};
 pub use system::SystemLanguagePlugin;
 pub use traits::{Language, LanguageError};

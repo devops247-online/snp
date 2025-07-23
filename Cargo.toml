@@ -83,6 +83,9 @@ infer = "0.15"
 which = "5.0"
 futures = "0.3"
 
+# Python language support dependencies
+pep440_rs = "0.6"        # PEP 440 version specifier parsing
+
 # Concurrency and performance
 crossbeam = "0.8"
 rayon = "1.7"
