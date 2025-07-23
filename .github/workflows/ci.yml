@@ -23,6 +23,17 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    - name: Install Python dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-venv python3-pip
+        python3 -m pip install --upgrade pip
+
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@master
       with:
@@ -59,6 +70,17 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    - name: Install Python dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-venv python3-pip
+        python3 -m pip install --upgrade pip
 
     - name: Install Rust nightly toolchain
       uses: dtolnay/rust-toolchain@master
@@ -97,7 +119,7 @@ jobs:
     - name: Cache dependencies
       uses: Swatinem/rust-cache@v2
       with:
-        key: ${{ matrix.rust }}
+        key: ${{ matrix.os }}
 
     - name: Build release
       run: cargo build --release --verbose

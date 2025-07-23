@@ -107,6 +107,11 @@ filetime = "0.2"
 # Date and time handling
 chrono = { version = "0.4", features = ["serde"] }
 
+# HTTP client for API requests
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
+url = "2.4"
+urlencoding = "2.1"
+
 # Database storage
 rusqlite = { version = "0.31", features = ["bundled"] }
 
