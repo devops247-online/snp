@@ -12,6 +12,7 @@ pub mod file_lock;
 pub mod filesystem;
 pub mod git;
 pub mod hook_chaining;
+pub mod language;
 pub mod logging;
 pub mod migration;
 pub mod output;
@@ -48,6 +49,14 @@ pub use hook_chaining::{
     ExecutionPlan, ExecutionStrategy, FailureBehavior, FailureStrategy, HookChain,
     HookChainExecutor, InterHookCommunication,
 };
+pub use language::{
+    BaseLanguagePlugin, CommandBuilder, Dependency, DependencyConflict, DependencyManager,
+    DependencyManagerConfig, DependencySource, EnvironmentConfig, EnvironmentInfo,
+    EnvironmentManager, EnvironmentMetadata, ExecutionCache, InstallationResult, InstalledPackage,
+    IsolationLevel, Language, LanguageEnvironment, LanguageError, LanguageHookExecutor,
+    LanguageRegistry, PluginMetadata, ResolvedDependency, UpdateResult, ValidationIssue,
+    ValidationReport, VersionSpec,
+};
 pub use logging::{ColorConfig, LogConfig, LogFormat};
 pub use migration::{
     AppliedMigration, ConfigFormat, ConfigMigrator, FieldMigration, FieldTransformation,
@@ -70,7 +79,7 @@ pub use regex_processor::{
     BatchRegexProcessor, CompiledRegex, MatchMatrix, PatternAnalysis, PatternAnalyzer,
     PatternIssue, PerformanceClass, RegexConfig, RegexError, RegexProcessor, SecurityWarning,
 };
-pub use storage::{ConfigInfo, EnvironmentInfo, RepositoryInfo, Store};
+pub use storage::{ConfigInfo, EnvironmentInfo as StorageEnvironmentInfo, RepositoryInfo, Store};
 pub use validation::{
     PerformanceImpact, PerformanceIssue, PerformanceMetrics, PerformanceWarning, SchemaValidator,
     ValidationConfig, ValidationError, ValidationErrorType, ValidationResult, ValidationWarning,

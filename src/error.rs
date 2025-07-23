@@ -146,7 +146,7 @@ pub enum GitError {
 }
 
 /// Hook execution errors with detailed context
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone)]
 pub enum HookExecutionError {
     #[error("Command not found: {command}")]
     CommandNotFound {

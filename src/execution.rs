@@ -65,7 +65,7 @@ impl ExecutionConfig {
 }
 
 /// Individual hook execution result
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HookExecutionResult {
     pub hook_id: String,
     pub success: bool,
