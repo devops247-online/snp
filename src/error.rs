@@ -155,8 +155,8 @@ pub enum HookExecutionError {
     #[error("Hook execution timeout: {hook_id}")]
     ExecutionTimeout {
         hook_id: String,
-        command: String,
-        timeout_secs: u64,
+        timeout: std::time::Duration,
+        partial_output: Option<String>,
     },
 
     #[error("Permission denied executing hook: {hook_id}")]
@@ -191,6 +191,21 @@ pub enum HookExecutionError {
         hook_id: String,
         language: String,
         error: String,
+    },
+
+    #[error("Invalid command for hook {hook_id}: {command}")]
+    InvalidCommand {
+        hook_id: String,
+        command: String,
+        error: String,
+    },
+
+    #[error("Hook execution failed: {hook_id} (exit code: {exit_code})")]
+    ExecutionFailed {
+        hook_id: String,
+        exit_code: i32,
+        stdout: String,
+        stderr: String,
     },
 }
 

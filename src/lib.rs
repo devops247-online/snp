@@ -7,6 +7,7 @@ pub mod concurrency;
 pub mod config;
 pub mod core;
 pub mod error;
+pub mod execution;
 pub mod file_lock;
 pub mod filesystem;
 pub mod git;
@@ -32,6 +33,7 @@ pub use error::{
     exit_codes, CliError, ConfigError, GitError, HookExecutionError, LockError, ProcessError,
     Result, SnpError, StorageError,
 };
+pub use execution::{ExecutionConfig, ExecutionResult, HookExecutionEngine, HookExecutionResult};
 pub use file_lock::{
     ConfigFileLock, FileLock, FileLockManager, LockBehavior, LockConfig, LockHierarchy, LockInfo,
     LockMetrics, LockOrdering, LockStatus, LockType, StaleLockDetector, TempFileLock,
@@ -39,18 +41,18 @@ pub use file_lock::{
 pub use filesystem::{FileFilter, FileSystem};
 pub use git::GitRepository;
 pub use logging::{ColorConfig, LogConfig, LogFormat};
+pub use migration::{
+    AppliedMigration, ConfigFormat, ConfigMigrator, FieldMigration, FieldTransformation,
+    MigrationComplexity, MigrationConfig, MigrationError, MigrationPlan, MigrationResult,
+    MigrationRule, MigrationWarning, RepositoryMigrationResult, StructuralChange,
+    StructuralChangeType, TransformationType,
+};
 pub use process::{
     OutputHandler, ProcessConfig, ProcessEnvironment, ProcessManager, ProcessResult,
 };
 pub use regex_processor::{
     BatchRegexProcessor, CompiledRegex, MatchMatrix, PatternAnalysis, PatternAnalyzer,
     PatternIssue, PerformanceClass, RegexConfig, RegexError, RegexProcessor, SecurityWarning,
-};
-pub use migration::{
-    AppliedMigration, ConfigFormat, ConfigMigrator, FieldMigration, FieldTransformation,
-    MigrationComplexity, MigrationConfig, MigrationError, MigrationPlan, MigrationResult, 
-    MigrationRule, MigrationWarning, RepositoryMigrationResult, StructuralChange, 
-    StructuralChangeType, TransformationType,
 };
 pub use storage::{ConfigInfo, EnvironmentInfo, RepositoryInfo, Store};
 pub use validation::{

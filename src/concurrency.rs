@@ -294,7 +294,7 @@ impl ConcurrencyExecutor {
             semaphore: Arc::new(Semaphore::new(max_concurrent)),
             resource_limits,
             task_registry: Arc::new(RwLock::new(HashMap::new())),
-            process_manager: Arc::new(ProcessManager::new(
+            process_manager: Arc::new(ProcessManager::with_config(
                 max_concurrent,
                 Duration::from_secs(300),
             )),

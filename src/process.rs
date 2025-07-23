@@ -85,6 +85,11 @@ impl ProcessConfig {
         self.inherit_env = inherit;
         self
     }
+
+    pub fn with_additional_args(mut self, additional_args: Vec<OsString>) -> Self {
+        self.args.extend(additional_args);
+        self
+    }
 }
 
 /// Process execution result
@@ -105,6 +110,14 @@ impl ProcessResult {
     pub fn exit_code(&self) -> Option<i32> {
         self.exit_status.code()
     }
+
+    pub fn stdout(&self) -> String {
+        String::from_utf8_lossy(&self.stdout).to_string()
+    }
+
+    pub fn stderr(&self) -> String {
+        String::from_utf8_lossy(&self.stderr).to_string()
+    }
 }
 
 /// Main process manager
@@ -114,7 +127,14 @@ pub struct ProcessManager {
 }
 
 impl ProcessManager {
-    pub fn new(max_concurrent: usize, default_timeout: Duration) -> Self {
+    pub fn new() -> Self {
+        Self {
+            max_concurrent: 4,
+            default_timeout: Duration::from_secs(60),
+        }
+    }
+
+    pub fn with_config(max_concurrent: usize, default_timeout: Duration) -> Self {
         Self {
             max_concurrent,
             default_timeout,
@@ -272,7 +292,7 @@ impl ProcessManager {
                 })?;
 
                 // Create a new ProcessManager for this task
-                let manager = ProcessManager::new(1, Duration::from_secs(30));
+                let manager = ProcessManager::with_config(1, Duration::from_secs(30));
                 manager.execute_async(config).await
             });
             tasks.push(task);
@@ -323,6 +343,12 @@ impl ProcessManager {
     pub fn set_resource_limits(&mut self, _limits: ResourceLimits) {
         // Resource limits would be implemented using platform-specific APIs
         // For now, this is a no-op placeholder
+    }
+}
+
+impl Default for ProcessManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
