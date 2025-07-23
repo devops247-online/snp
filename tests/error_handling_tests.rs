@@ -125,8 +125,8 @@ fn test_hook_execution_errors() {
     // Test execution timeout
     let hook_error = HookExecutionError::ExecutionTimeout {
         hook_id: "slow-hook".to_string(),
-        command: "sleep 1000".to_string(),
-        timeout_secs: 60,
+        timeout: std::time::Duration::from_secs(60),
+        partial_output: Some("Command was interrupted".to_string()),
     };
     let snp_error = SnpError::HookExecution(Box::new(hook_error));
     assert_eq!(snp_error.exit_code(), 6); // TIMEOUT_ERROR

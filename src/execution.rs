@@ -184,6 +184,7 @@ impl Default for ExecutionResult {
 /// Main hook execution engine
 pub struct HookExecutionEngine {
     process_manager: Arc<ProcessManager>,
+    #[allow(dead_code)] // Storage will be used for caching in future refactor phase
     storage: Arc<Store>,
 }
 

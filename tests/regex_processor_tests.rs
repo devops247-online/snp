@@ -83,11 +83,11 @@ fn test_pattern_matching() {
     ];
 
     for (pattern, should_match, should_not_match) in patterns {
-        let result = processor.is_match(pattern, &should_match[0]);
+        let result = processor.is_match(pattern, should_match[0]);
         assert!(result.is_ok(), "Pattern matching should not error");
         assert!(result.unwrap(), "Should match expected files");
 
-        let result = processor.is_match(pattern, &should_not_match[0]);
+        let result = processor.is_match(pattern, should_not_match[0]);
         assert!(result.is_ok(), "Pattern matching should not error");
         assert!(!result.unwrap(), "Should not match unexpected files");
     }
@@ -143,7 +143,7 @@ fn test_performance_optimization() {
 
     // Test regex compilation caching effectiveness
     let patterns = (0..100)
-        .map(|i| format!(r"test_pattern_{}\.rs$", i))
+        .map(|i| format!(r"test_pattern_{i}\.rs$"))
         .collect::<Vec<_>>();
 
     // First compilation - all patterns should be cached
@@ -186,7 +186,7 @@ fn test_performance_optimization() {
         r"\.js$".to_string(),
     ];
     let test_texts = (0..1000)
-        .map(|i| format!("file_{}.rs", i))
+        .map(|i| format!("file_{i}.rs"))
         .collect::<Vec<_>>();
 
     let start_time = Instant::now();
@@ -203,13 +203,12 @@ fn test_performance_optimization() {
     let rate = combinations as f64 / batch_time.as_secs_f64();
     assert!(
         rate > 10_000.0,
-        "Should process >10k combinations/sec, got {}",
-        rate
+        "Should process >10k combinations/sec, got {rate}"
     );
 
     // Test memory usage with large pattern sets
     let large_patterns = (0..10000)
-        .map(|i| format!(r"pattern_{}.*\.ext$", i))
+        .map(|i| format!(r"pattern_{i}.*\.ext$"))
         .collect::<Vec<_>>();
     for pattern in &large_patterns[..100] {
         // Test subset to avoid too long test
@@ -244,7 +243,7 @@ fn test_error_handling_and_validation() {
 
     for (pattern, _expected_error_type) in invalid_patterns {
         let result = processor.compile(pattern);
-        assert!(result.is_err(), "Pattern '{}' should be invalid", pattern);
+        assert!(result.is_err(), "Pattern '{pattern}' should be invalid");
 
         match result.unwrap_err() {
             snp::SnpError::Regex(regex_err) => {
@@ -263,10 +262,10 @@ fn test_error_handling_and_validation() {
                             );
                         }
                     }
-                    _ => panic!("Expected InvalidPattern error for '{}'", pattern),
+                    _ => panic!("Expected InvalidPattern error for '{pattern}'"),
                 }
             }
-            _ => panic!("Expected Regex error for '{}'", pattern),
+            _ => panic!("Expected Regex error for '{pattern}'"),
         }
     }
 
@@ -288,7 +287,7 @@ fn test_error_handling_and_validation() {
 
     for pattern in valid_patterns {
         let result = processor.validate_pattern(pattern);
-        assert!(result.is_ok(), "Pattern '{}' should be valid", pattern);
+        assert!(result.is_ok(), "Pattern '{pattern}' should be valid");
     }
 
     // Test security validation (ReDoS prevention)
@@ -304,8 +303,7 @@ fn test_error_handling_and_validation() {
         assert!(
             !analysis.security_warnings.is_empty()
                 || analysis.estimated_performance == PerformanceClass::PotentiallyDangerous,
-            "Pattern '{}' should be flagged as potentially dangerous",
-            pattern
+            "Pattern '{pattern}' should be flagged as potentially dangerous"
         );
     }
 }
@@ -497,12 +495,7 @@ fn test_integration_scenarios() {
         for file in should_match {
             let result = processor.is_match(pattern, file);
             assert!(result.is_ok());
-            assert!(
-                result.unwrap(),
-                "Pattern '{}' should match '{}'",
-                pattern,
-                file
-            );
+            assert!(result.unwrap(), "Pattern '{pattern}' should match '{file}'");
         }
 
         for file in should_not_match {
@@ -510,9 +503,7 @@ fn test_integration_scenarios() {
             assert!(result.is_ok());
             assert!(
                 !result.unwrap(),
-                "Pattern '{}' should not match '{}'",
-                pattern,
-                file
+                "Pattern '{pattern}' should not match '{file}'"
             );
         }
     }
@@ -521,12 +512,12 @@ fn test_integration_scenarios() {
 // Helper functions for test data generation
 fn generate_test_patterns(count: usize) -> Vec<String> {
     (0..count)
-        .map(|i| format!(r"test_pattern_{}\.ext$", i))
+        .map(|i| format!(r"test_pattern_{i}\.ext$"))
         .collect()
 }
 
 fn generate_file_patterns(count: usize) -> Vec<String> {
-    let extensions = vec![
+    let extensions = [
         "rs", "py", "js", "go", "java", "cpp", "h", "txt", "md", "yaml",
     ];
     (0..count)
@@ -535,7 +526,7 @@ fn generate_file_patterns(count: usize) -> Vec<String> {
 }
 
 fn generate_file_paths(count: usize) -> Vec<String> {
-    let extensions = vec![
+    let extensions = [
         "rs", "py", "js", "go", "java", "cpp", "h", "txt", "md", "yaml",
     ];
     (0..count)
@@ -564,8 +555,7 @@ mod benchmark_tests {
         let avg_time_per_pattern = duration.as_millis() as f64 / patterns.len() as f64;
         assert!(
             avg_time_per_pattern < 50.0,
-            "Average compilation time {} ms should be < 50ms",
-            avg_time_per_pattern
+            "Average compilation time {avg_time_per_pattern} ms should be < 50ms"
         );
     }
 
@@ -585,8 +575,7 @@ mod benchmark_tests {
         // Should process more than 10,000 combinations per second
         assert!(
             rate > 10_000.0,
-            "Processing rate {} combinations/sec should be > 10,000",
-            rate
+            "Processing rate {rate} combinations/sec should be > 10,000"
         );
     }
 
@@ -621,8 +610,7 @@ mod benchmark_tests {
         let avg_time_per_hit = duration.as_nanos() as f64 / (patterns.len() * 10) as f64;
         assert!(
             avg_time_per_hit < 1_000.0,
-            "Average cache hit time {} ns should be < 1μs",
-            avg_time_per_hit
+            "Average cache hit time {avg_time_per_hit} ns should be < 1μs"
         );
     }
 }

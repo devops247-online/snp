@@ -10,7 +10,7 @@ use tempfile::TempDir;
 // Basic process execution tests
 #[test]
 fn test_process_execution_basic() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     // Test successful command execution
     let config = ProcessConfig::new("echo").with_args(vec!["hello", "world"]);
@@ -27,7 +27,7 @@ fn test_process_execution_basic() {
 
 #[test]
 fn test_process_execution_failure() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     // Test command that fails
     let config = ProcessConfig::new("false"); // Always exits with 1
@@ -41,7 +41,7 @@ fn test_process_execution_failure() {
 
 #[test]
 fn test_process_execution_command_not_found() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     // Test command that doesn't exist
     let config = ProcessConfig::new("this_command_does_not_exist_12345");
@@ -62,7 +62,7 @@ fn test_process_execution_command_not_found() {
 
 #[test]
 fn test_process_execution_with_arguments() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     // Test command with multiple arguments
     let config = ProcessConfig::new("echo").with_args(vec!["-n", "no", "newline"]);
@@ -74,7 +74,7 @@ fn test_process_execution_with_arguments() {
 
 #[test]
 fn test_process_execution_working_directory() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
     let temp_dir = TempDir::new().unwrap();
 
     // Create a file in the temp directory
@@ -91,7 +91,7 @@ fn test_process_execution_working_directory() {
 
 #[test]
 fn test_process_execution_environment_variables() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     let mut env = HashMap::new();
     env.insert("TEST_VAR".to_string(), "test_value".to_string());
@@ -109,7 +109,7 @@ fn test_process_execution_environment_variables() {
 // Timeout handling tests
 #[test]
 fn test_process_timeout_handling() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     // Test command that times out
     let config = ProcessConfig::new("sleep")
@@ -136,7 +136,7 @@ fn test_process_timeout_handling() {
 
 #[test]
 fn test_process_timeout_enforcement() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     // Test that timeout is properly enforced
     let config = ProcessConfig::new("sleep")
@@ -153,7 +153,7 @@ fn test_process_timeout_enforcement() {
 
 #[test]
 fn test_process_no_timeout() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     // Test command that should complete normally without timeout
     let config = ProcessConfig::new("echo")
@@ -169,7 +169,7 @@ fn test_process_no_timeout() {
 // Output capture tests
 #[test]
 fn test_process_output_capture_stdout() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     let config = ProcessConfig::new("echo")
         .with_args(vec!["stdout test"])
@@ -185,7 +185,7 @@ fn test_process_output_capture_stdout() {
 
 #[test]
 fn test_process_output_capture_stderr() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     let config = ProcessConfig::new("sh")
         .with_args(vec!["-c", "echo 'stderr test' >&2"])
@@ -201,7 +201,7 @@ fn test_process_output_capture_stderr() {
 
 #[test]
 fn test_process_output_capture_both() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     let config = ProcessConfig::new("sh")
         .with_args(vec!["-c", "echo 'stdout'; echo 'stderr' >&2"])
@@ -215,7 +215,7 @@ fn test_process_output_capture_both() {
 
 #[test]
 fn test_process_output_large() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     // Generate large output to test buffering
     let config = ProcessConfig::new("sh")
@@ -236,7 +236,7 @@ fn test_process_output_large() {
 
 #[test]
 fn test_process_output_streaming_callback() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     let config = ProcessConfig::new("echo")
         .with_args(vec!["streaming test"])
@@ -260,7 +260,7 @@ fn test_process_output_streaming_callback() {
 // Signal handling and graceful shutdown tests
 #[test]
 fn test_process_signal_handling_termination() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     // Test process that can be terminated
     let config = ProcessConfig::new("sleep")
@@ -284,7 +284,7 @@ fn test_process_signal_handling_termination() {
 fn test_process_signal_handling_interrupt() {
     // This test would require more complex signal handling
     // For now, we'll test that the process manager can handle interrupted processes
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     // Test with a command that might be interrupted
     let config = ProcessConfig::new("sh")
@@ -307,7 +307,7 @@ fn test_process_signal_handling_interrupt() {
 
 #[test]
 fn test_process_signal_propagation() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     // Test that signals are properly propagated to child processes
     let config = ProcessConfig::new("sh")
@@ -325,7 +325,7 @@ fn test_process_signal_propagation() {
 // Environment isolation and management tests
 #[test]
 fn test_process_environment_isolation() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     // Set a unique environment variable for this process
     std::env::set_var("TEST_ISOLATION_VAR", "parent_value");
@@ -354,7 +354,7 @@ fn test_process_environment_isolation() {
 
 #[test]
 fn test_process_environment_inheritance() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     // Set a test variable in parent
     std::env::set_var("TEST_INHERIT_VAR", "inherited_value");
@@ -376,7 +376,7 @@ fn test_process_environment_inheritance() {
 
 #[test]
 fn test_process_environment_path_setup() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     let mut env = HashMap::new();
     env.insert("PATH".to_string(), "/custom/bin:/usr/bin".to_string());
@@ -426,7 +426,7 @@ fn test_process_environment_inherit_system() {
 // Parallel process execution tests
 #[test]
 fn test_parallel_process_execution() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     let configs = vec![
         ProcessConfig::new("echo").with_args(vec!["test1"]),
@@ -454,7 +454,7 @@ fn test_parallel_process_execution() {
 
 #[test]
 fn test_parallel_process_execution_with_failures() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     let configs = vec![
         ProcessConfig::new("echo").with_args(vec!["success"]),
@@ -473,7 +473,7 @@ fn test_parallel_process_execution_with_failures() {
 
 #[test]
 fn test_parallel_process_resource_limits() {
-    let manager = ProcessManager::new(2, Duration::from_secs(30)); // Limit to 2 concurrent
+    let manager = ProcessManager::with_config(2, Duration::from_secs(30)); // Limit to 2 concurrent
 
     let configs = vec![
         ProcessConfig::new("sleep").with_args(vec!["0.1"]),
@@ -499,7 +499,7 @@ fn test_parallel_process_resource_limits() {
 
 #[test]
 fn test_parallel_process_error_aggregation() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     let configs = vec![
         ProcessConfig::new("sh").with_args(vec!["-c", "exit 1"]),
@@ -544,14 +544,14 @@ fn test_buffered_output_handler_multiple_writes() {
 // Process manager configuration tests
 #[test]
 fn test_process_manager_creation() {
-    let _manager = ProcessManager::new(8, Duration::from_secs(60));
+    let _manager = ProcessManager::with_config(8, Duration::from_secs(60));
     // Just test that it can be created without panicking
     // The internal fields are private, so we can't test them directly
 }
 
 #[test]
 fn test_process_manager_terminate_all() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     // This should not panic even if no processes are running
     let result = manager.terminate_all();
@@ -567,7 +567,7 @@ fn test_process_result_success_methods() {
     // We can't easily create a ProcessResult without running a process
     // These tests will be meaningful once the implementation is complete
 
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     let config = ProcessConfig::new("true"); // Always succeeds
     let result = manager.execute(config).unwrap();
@@ -579,7 +579,7 @@ fn test_process_result_success_methods() {
 
 #[test]
 fn test_process_result_failure_methods() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     let config = ProcessConfig::new("false"); // Always fails
     let result = manager.execute(config).unwrap();
@@ -592,7 +592,7 @@ fn test_process_result_failure_methods() {
 // Additional edge case tests
 #[test]
 fn test_process_execution_empty_command() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     let config = ProcessConfig::new(""); // Empty command
     let result = manager.execute(config);
@@ -603,7 +603,7 @@ fn test_process_execution_empty_command() {
 
 #[test]
 fn test_process_execution_very_long_output() {
-    let manager = ProcessManager::new(4, Duration::from_secs(30));
+    let manager = ProcessManager::with_config(4, Duration::from_secs(30));
 
     // Generate very long output (1MB+)
     let config = ProcessConfig::new("sh")
