@@ -280,7 +280,7 @@ impl RepositoryVersionResolver {
 
         // Parse repository URL to determine service
         let service = self.parse_repository_service(repo_url)?;
-        
+
         match service {
             RepositoryService::GitHub { owner, repo } => {
                 self.resolve_github_version(&owner, &repo, strategy).await
@@ -288,9 +288,7 @@ impl RepositoryVersionResolver {
             RepositoryService::GitLab { owner, repo } => {
                 self.resolve_gitlab_version(&owner, &repo, strategy).await
             }
-            RepositoryService::Other(_) => {
-                self.resolve_git_version(repo_url, strategy).await
-            }
+            RepositoryService::Other(_) => self.resolve_git_version(repo_url, strategy).await,
         }
     }
 
@@ -299,7 +297,7 @@ impl RepositoryVersionResolver {
         debug!("Listing versions for {}", repo_url);
 
         let service = self.parse_repository_service(repo_url)?;
-        
+
         match service {
             RepositoryService::GitHub { owner, repo } => {
                 self.list_github_versions(&owner, &repo).await
@@ -307,9 +305,7 @@ impl RepositoryVersionResolver {
             RepositoryService::GitLab { owner, repo } => {
                 self.list_gitlab_versions(&owner, &repo).await
             }
-            RepositoryService::Other(_) => {
-                self.list_git_versions(repo_url).await
-            }
+            RepositoryService::Other(_) => self.list_git_versions(repo_url).await,
         }
     }
 
@@ -364,12 +360,15 @@ impl RepositoryVersionResolver {
 
         match url.host_str() {
             Some("github.com") => {
-                let path_segments: Vec<&str> = url.path_segments()
-                    .ok_or_else(|| SnpError::Config(Box::new(crate::error::ConfigError::ValidationFailed {
-                        message: "Invalid GitHub URL path".to_string(),
-                        file_path: None,
-                        errors: vec!["GitHub URL must have owner/repo format".to_string()],
-                    })))?
+                let path_segments: Vec<&str> = url
+                    .path_segments()
+                    .ok_or_else(|| {
+                        SnpError::Config(Box::new(crate::error::ConfigError::ValidationFailed {
+                            message: "Invalid GitHub URL path".to_string(),
+                            file_path: None,
+                            errors: vec!["GitHub URL must have owner/repo format".to_string()],
+                        }))
+                    })?
                     .collect();
 
                 if path_segments.len() >= 2 {
@@ -377,20 +376,27 @@ impl RepositoryVersionResolver {
                     let repo = path_segments[1].trim_end_matches(".git").to_string();
                     Ok(RepositoryService::GitHub { owner, repo })
                 } else {
-                    Err(SnpError::Config(Box::new(crate::error::ConfigError::ValidationFailed {
-                        message: "Invalid GitHub URL format".to_string(),
-                        file_path: None,
-                        errors: vec!["Expected format: https://github.com/owner/repo".to_string()],
-                    })))
+                    Err(SnpError::Config(Box::new(
+                        crate::error::ConfigError::ValidationFailed {
+                            message: "Invalid GitHub URL format".to_string(),
+                            file_path: None,
+                            errors: vec![
+                                "Expected format: https://github.com/owner/repo".to_string()
+                            ],
+                        },
+                    )))
                 }
             }
             Some("gitlab.com") => {
-                let path_segments: Vec<&str> = url.path_segments()
-                    .ok_or_else(|| SnpError::Config(Box::new(crate::error::ConfigError::ValidationFailed {
-                        message: "Invalid GitLab URL path".to_string(),
-                        file_path: None,
-                        errors: vec!["GitLab URL must have owner/repo format".to_string()],
-                    })))?
+                let path_segments: Vec<&str> = url
+                    .path_segments()
+                    .ok_or_else(|| {
+                        SnpError::Config(Box::new(crate::error::ConfigError::ValidationFailed {
+                            message: "Invalid GitLab URL path".to_string(),
+                            file_path: None,
+                            errors: vec!["GitLab URL must have owner/repo format".to_string()],
+                        }))
+                    })?
                     .collect();
 
                 if path_segments.len() >= 2 {
@@ -398,11 +404,15 @@ impl RepositoryVersionResolver {
                     let repo = path_segments[1].trim_end_matches(".git").to_string();
                     Ok(RepositoryService::GitLab { owner, repo })
                 } else {
-                    Err(SnpError::Config(Box::new(crate::error::ConfigError::ValidationFailed {
-                        message: "Invalid GitLab URL format".to_string(),
-                        file_path: None,
-                        errors: vec!["Expected format: https://gitlab.com/owner/repo".to_string()],
-                    })))
+                    Err(SnpError::Config(Box::new(
+                        crate::error::ConfigError::ValidationFailed {
+                            message: "Invalid GitLab URL format".to_string(),
+                            file_path: None,
+                            errors: vec![
+                                "Expected format: https://gitlab.com/owner/repo".to_string()
+                            ],
+                        },
+                    )))
                 }
             }
             _ => Ok(RepositoryService::Other(repo_url.to_string())),
@@ -416,20 +426,22 @@ impl RepositoryVersionResolver {
         repo: &str,
         strategy: &UpdateStrategy,
     ) -> Result<RepoVersion> {
-        debug!("Resolving GitHub version for {}/{} with strategy {:?}", owner, repo, strategy);
+        debug!(
+            "Resolving GitHub version for {}/{} with strategy {:?}",
+            owner, repo, strategy
+        );
 
         match strategy {
             UpdateStrategy::LatestTag | UpdateStrategy::LatestStable => {
                 self.get_github_latest_tag(owner, repo).await
             }
-            UpdateStrategy::LatestCommit => {
-                self.get_github_latest_commit(owner, repo).await
-            }
+            UpdateStrategy::LatestCommit => self.get_github_latest_commit(owner, repo).await,
             UpdateStrategy::MajorVersion(major) => {
                 self.get_github_version_by_major(owner, repo, *major).await
             }
             UpdateStrategy::MinorVersion(major, minor) => {
-                self.get_github_version_by_minor(owner, repo, *major, *minor).await
+                self.get_github_version_by_minor(owner, repo, *major, *minor)
+                    .await
             }
         }
     }
@@ -437,28 +449,33 @@ impl RepositoryVersionResolver {
     /// Get latest tag from GitHub
     async fn get_github_latest_tag(&self, owner: &str, repo: &str) -> Result<RepoVersion> {
         let url = format!("https://api.github.com/repos/{}/{}/tags", owner, repo);
-        
-        let response = self.http_client
+
+        let response = self
+            .http_client
             .get(&url)
             .header("Accept", "application/vnd.github.v3+json")
             .send()
             .await
-            .map_err(|e| SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: format!("GET {}", url),
-                exit_code: None,
-                stdout: String::new(),
-                stderr: format!("HTTP request failed: {}", e),
-                working_dir: None,
-            })))?;
+            .map_err(|e| {
+                SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
+                    command: format!("GET {}", url),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: format!("HTTP request failed: {}", e),
+                    working_dir: None,
+                }))
+            })?;
 
         if !response.status().is_success() {
-            return Err(SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: format!("GET {}", url),
-                exit_code: Some(response.status().as_u16() as i32),
-                stdout: String::new(),
-                stderr: format!("GitHub API returned status: {}", response.status()),
-                working_dir: None,
-            })));
+            return Err(SnpError::Git(Box::new(
+                crate::error::GitError::CommandFailed {
+                    command: format!("GET {}", url),
+                    exit_code: Some(response.status().as_u16() as i32),
+                    stdout: String::new(),
+                    stderr: format!("GitHub API returned status: {}", response.status()),
+                    working_dir: None,
+                },
+            )));
         }
 
         let tags: Vec<GitHubTag> = response.json().await.map_err(|e| {
@@ -472,13 +489,15 @@ impl RepositoryVersionResolver {
         })?;
 
         if tags.is_empty() {
-            return Err(SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: "get tags".to_string(),
-                exit_code: None,
-                stdout: String::new(),
-                stderr: "No tags found in repository".to_string(),
-                working_dir: None,
-            })));
+            return Err(SnpError::Git(Box::new(
+                crate::error::GitError::CommandFailed {
+                    command: "get tags".to_string(),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: "No tags found in repository".to_string(),
+                    working_dir: None,
+                },
+            )));
         }
 
         // Get the first (latest) tag
@@ -493,29 +512,34 @@ impl RepositoryVersionResolver {
     /// Get latest commit from GitHub
     async fn get_github_latest_commit(&self, owner: &str, repo: &str) -> Result<RepoVersion> {
         let url = format!("https://api.github.com/repos/{}/{}/commits", owner, repo);
-        
-        let response = self.http_client
+
+        let response = self
+            .http_client
             .get(&url)
             .header("Accept", "application/vnd.github.v3+json")
             .query(&[("per_page", "1")])
             .send()
             .await
-            .map_err(|e| SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: format!("GET {}", url),
-                exit_code: None,
-                stdout: String::new(),
-                stderr: format!("HTTP request failed: {}", e),
-                working_dir: None,
-            })))?;
+            .map_err(|e| {
+                SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
+                    command: format!("GET {}", url),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: format!("HTTP request failed: {}", e),
+                    working_dir: None,
+                }))
+            })?;
 
         if !response.status().is_success() {
-            return Err(SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: format!("GET {}", url),
-                exit_code: Some(response.status().as_u16() as i32),
-                stdout: String::new(),
-                stderr: format!("GitHub API returned status: {}", response.status()),
-                working_dir: None,
-            })));
+            return Err(SnpError::Git(Box::new(
+                crate::error::GitError::CommandFailed {
+                    command: format!("GET {}", url),
+                    exit_code: Some(response.status().as_u16() as i32),
+                    stdout: String::new(),
+                    stderr: format!("GitHub API returned status: {}", response.status()),
+                    working_dir: None,
+                },
+            )));
         }
 
         let commits: Vec<serde_json::Value> = response.json().await.map_err(|e| {
@@ -529,18 +553,23 @@ impl RepositoryVersionResolver {
         })?;
 
         if commits.is_empty() {
-            return Err(SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: "get commits".to_string(),
-                exit_code: None,
-                stdout: String::new(),
-                stderr: "No commits found in repository".to_string(),
-                working_dir: None,
-            })));
+            return Err(SnpError::Git(Box::new(
+                crate::error::GitError::CommandFailed {
+                    command: "get commits".to_string(),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: "No commits found in repository".to_string(),
+                    working_dir: None,
+                },
+            )));
         }
 
         let latest_commit = &commits[0];
-        let sha = latest_commit["sha"].as_str().unwrap_or("unknown").to_string();
-        
+        let sha = latest_commit["sha"]
+            .as_str()
+            .unwrap_or("unknown")
+            .to_string();
+
         let mut version = RepoVersion::new(sha.clone(), None);
         version.commit_hash = Some(sha);
         version.commit_date = chrono::Utc::now(); // TODO: Parse actual commit date
@@ -549,11 +578,17 @@ impl RepositoryVersionResolver {
     }
 
     /// Get version by major version from GitHub
-    async fn get_github_version_by_major(&self, owner: &str, repo: &str, major: u32) -> Result<RepoVersion> {
+    async fn get_github_version_by_major(
+        &self,
+        owner: &str,
+        repo: &str,
+        major: u32,
+    ) -> Result<RepoVersion> {
         let tags = self.list_github_versions(owner, repo).await?;
-        
+
         // Find the latest version with matching major version
-        let matching_versions: Vec<_> = tags.iter()
+        let matching_versions: Vec<_> = tags
+            .iter()
             .filter(|v| {
                 if let Some(version) = &v.version {
                     version.major == major as u64
@@ -564,13 +599,15 @@ impl RepositoryVersionResolver {
             .collect();
 
         if matching_versions.is_empty() {
-            return Err(SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: "find version".to_string(),
-                exit_code: None,
-                stdout: String::new(),
-                stderr: format!("No versions found with major version {}", major),
-                working_dir: None,
-            })));
+            return Err(SnpError::Git(Box::new(
+                crate::error::GitError::CommandFailed {
+                    command: "find version".to_string(),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: format!("No versions found with major version {}", major),
+                    working_dir: None,
+                },
+            )));
         }
 
         // Return the latest (first) matching version
@@ -578,11 +615,18 @@ impl RepositoryVersionResolver {
     }
 
     /// Get version by major.minor from GitHub
-    async fn get_github_version_by_minor(&self, owner: &str, repo: &str, major: u32, minor: u32) -> Result<RepoVersion> {
+    async fn get_github_version_by_minor(
+        &self,
+        owner: &str,
+        repo: &str,
+        major: u32,
+        minor: u32,
+    ) -> Result<RepoVersion> {
         let tags = self.list_github_versions(owner, repo).await?;
-        
+
         // Find the latest version with matching major.minor version
-        let matching_versions: Vec<_> = tags.iter()
+        let matching_versions: Vec<_> = tags
+            .iter()
             .filter(|v| {
                 if let Some(version) = &v.version {
                     version.major == major as u64 && version.minor == minor as u64
@@ -593,13 +637,15 @@ impl RepositoryVersionResolver {
             .collect();
 
         if matching_versions.is_empty() {
-            return Err(SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: "find version".to_string(),
-                exit_code: None,
-                stdout: String::new(),
-                stderr: format!("No versions found with version {}.{}", major, minor),
-                working_dir: None,
-            })));
+            return Err(SnpError::Git(Box::new(
+                crate::error::GitError::CommandFailed {
+                    command: "find version".to_string(),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: format!("No versions found with version {}.{}", major, minor),
+                    working_dir: None,
+                },
+            )));
         }
 
         // Return the latest (first) matching version
@@ -609,29 +655,34 @@ impl RepositoryVersionResolver {
     /// List all versions from GitHub
     async fn list_github_versions(&self, owner: &str, repo: &str) -> Result<Vec<RepoVersion>> {
         let url = format!("https://api.github.com/repos/{}/{}/tags", owner, repo);
-        
-        let response = self.http_client
+
+        let response = self
+            .http_client
             .get(&url)
             .header("Accept", "application/vnd.github.v3+json")
             .query(&[("per_page", "100")]) // Get up to 100 tags
             .send()
             .await
-            .map_err(|e| SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: format!("GET {}", url),
-                exit_code: None,
-                stdout: String::new(),
-                stderr: format!("HTTP request failed: {}", e),
-                working_dir: None,
-            })))?;
+            .map_err(|e| {
+                SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
+                    command: format!("GET {}", url),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: format!("HTTP request failed: {}", e),
+                    working_dir: None,
+                }))
+            })?;
 
         if !response.status().is_success() {
-            return Err(SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: format!("GET {}", url),
-                exit_code: Some(response.status().as_u16() as i32),
-                stdout: String::new(),
-                stderr: format!("GitHub API returned status: {}", response.status()),
-                working_dir: None,
-            })));
+            return Err(SnpError::Git(Box::new(
+                crate::error::GitError::CommandFailed {
+                    command: format!("GET {}", url),
+                    exit_code: Some(response.status().as_u16() as i32),
+                    stdout: String::new(),
+                    stderr: format!("GitHub API returned status: {}", response.status()),
+                    working_dir: None,
+                },
+            )));
         }
 
         let tags: Vec<GitHubTag> = response.json().await.map_err(|e| {
@@ -662,20 +713,22 @@ impl RepositoryVersionResolver {
         repo: &str,
         strategy: &UpdateStrategy,
     ) -> Result<RepoVersion> {
-        debug!("Resolving GitLab version for {}/{} with strategy {:?}", owner, repo, strategy);
+        debug!(
+            "Resolving GitLab version for {}/{} with strategy {:?}",
+            owner, repo, strategy
+        );
 
         match strategy {
             UpdateStrategy::LatestTag | UpdateStrategy::LatestStable => {
                 self.get_gitlab_latest_tag(owner, repo).await
             }
-            UpdateStrategy::LatestCommit => {
-                self.get_gitlab_latest_commit(owner, repo).await
-            }
+            UpdateStrategy::LatestCommit => self.get_gitlab_latest_commit(owner, repo).await,
             UpdateStrategy::MajorVersion(major) => {
                 self.get_gitlab_version_by_major(owner, repo, *major).await
             }
             UpdateStrategy::MinorVersion(major, minor) => {
-                self.get_gitlab_version_by_minor(owner, repo, *major, *minor).await
+                self.get_gitlab_version_by_minor(owner, repo, *major, *minor)
+                    .await
             }
         }
     }
@@ -684,28 +737,31 @@ impl RepositoryVersionResolver {
     async fn get_gitlab_latest_tag(&self, owner: &str, repo: &str) -> Result<RepoVersion> {
         let project_path = format!("{}/{}", owner, repo);
         let encoded_path = urlencoding::encode(&project_path);
-        let url = format!("https://gitlab.com/api/v4/projects/{}/repository/tags", encoded_path);
-        
-        let response = self.http_client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
+        let url = format!(
+            "https://gitlab.com/api/v4/projects/{}/repository/tags",
+            encoded_path
+        );
+
+        let response = self.http_client.get(&url).send().await.map_err(|e| {
+            SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
                 command: format!("GET {}", url),
                 exit_code: None,
                 stdout: String::new(),
                 stderr: format!("HTTP request failed: {}", e),
                 working_dir: None,
-            })))?;
+            }))
+        })?;
 
         if !response.status().is_success() {
-            return Err(SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: format!("GET {}", url),
-                exit_code: Some(response.status().as_u16() as i32),
-                stdout: String::new(),
-                stderr: format!("GitLab API returned status: {}", response.status()),
-                working_dir: None,
-            })));
+            return Err(SnpError::Git(Box::new(
+                crate::error::GitError::CommandFailed {
+                    command: format!("GET {}", url),
+                    exit_code: Some(response.status().as_u16() as i32),
+                    stdout: String::new(),
+                    stderr: format!("GitLab API returned status: {}", response.status()),
+                    working_dir: None,
+                },
+            )));
         }
 
         let tags: Vec<GitLabTag> = response.json().await.map_err(|e| {
@@ -719,13 +775,15 @@ impl RepositoryVersionResolver {
         })?;
 
         if tags.is_empty() {
-            return Err(SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: "get tags".to_string(),
-                exit_code: None,
-                stdout: String::new(),
-                stderr: "No tags found in repository".to_string(),
-                working_dir: None,
-            })));
+            return Err(SnpError::Git(Box::new(
+                crate::error::GitError::CommandFailed {
+                    command: "get tags".to_string(),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: "No tags found in repository".to_string(),
+                    working_dir: None,
+                },
+            )));
         }
 
         // Get the first (latest) tag
@@ -742,29 +800,37 @@ impl RepositoryVersionResolver {
     async fn get_gitlab_latest_commit(&self, owner: &str, repo: &str) -> Result<RepoVersion> {
         let project_path = format!("{}/{}", owner, repo);
         let encoded_path = urlencoding::encode(&project_path);
-        let url = format!("https://gitlab.com/api/v4/projects/{}/repository/commits", encoded_path);
-        
-        let response = self.http_client
+        let url = format!(
+            "https://gitlab.com/api/v4/projects/{}/repository/commits",
+            encoded_path
+        );
+
+        let response = self
+            .http_client
             .get(&url)
             .query(&[("per_page", "1")])
             .send()
             .await
-            .map_err(|e| SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: format!("GET {}", url),
-                exit_code: None,
-                stdout: String::new(),
-                stderr: format!("HTTP request failed: {}", e),
-                working_dir: None,
-            })))?;
+            .map_err(|e| {
+                SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
+                    command: format!("GET {}", url),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: format!("HTTP request failed: {}", e),
+                    working_dir: None,
+                }))
+            })?;
 
         if !response.status().is_success() {
-            return Err(SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: format!("GET {}", url),
-                exit_code: Some(response.status().as_u16() as i32),
-                stdout: String::new(),
-                stderr: format!("GitLab API returned status: {}", response.status()),
-                working_dir: None,
-            })));
+            return Err(SnpError::Git(Box::new(
+                crate::error::GitError::CommandFailed {
+                    command: format!("GET {}", url),
+                    exit_code: Some(response.status().as_u16() as i32),
+                    stdout: String::new(),
+                    stderr: format!("GitLab API returned status: {}", response.status()),
+                    working_dir: None,
+                },
+            )));
         }
 
         let commits: Vec<serde_json::Value> = response.json().await.map_err(|e| {
@@ -778,18 +844,23 @@ impl RepositoryVersionResolver {
         })?;
 
         if commits.is_empty() {
-            return Err(SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: "get commits".to_string(),
-                exit_code: None,
-                stdout: String::new(),
-                stderr: "No commits found in repository".to_string(),
-                working_dir: None,
-            })));
+            return Err(SnpError::Git(Box::new(
+                crate::error::GitError::CommandFailed {
+                    command: "get commits".to_string(),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: "No commits found in repository".to_string(),
+                    working_dir: None,
+                },
+            )));
         }
 
         let latest_commit = &commits[0];
-        let sha = latest_commit["id"].as_str().unwrap_or("unknown").to_string();
-        
+        let sha = latest_commit["id"]
+            .as_str()
+            .unwrap_or("unknown")
+            .to_string();
+
         let mut version = RepoVersion::new(sha.clone(), None);
         version.commit_hash = Some(sha);
         version.commit_date = chrono::Utc::now(); // TODO: Parse actual commit date
@@ -798,11 +869,17 @@ impl RepositoryVersionResolver {
     }
 
     /// Get version by major version from GitLab
-    async fn get_gitlab_version_by_major(&self, owner: &str, repo: &str, major: u32) -> Result<RepoVersion> {
+    async fn get_gitlab_version_by_major(
+        &self,
+        owner: &str,
+        repo: &str,
+        major: u32,
+    ) -> Result<RepoVersion> {
         let tags = self.list_gitlab_versions(owner, repo).await?;
-        
+
         // Find the latest version with matching major version
-        let matching_versions: Vec<_> = tags.iter()
+        let matching_versions: Vec<_> = tags
+            .iter()
             .filter(|v| {
                 if let Some(version) = &v.version {
                     version.major == major as u64
@@ -813,13 +890,15 @@ impl RepositoryVersionResolver {
             .collect();
 
         if matching_versions.is_empty() {
-            return Err(SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: "find version".to_string(),
-                exit_code: None,
-                stdout: String::new(),
-                stderr: format!("No versions found with major version {}", major),
-                working_dir: None,
-            })));
+            return Err(SnpError::Git(Box::new(
+                crate::error::GitError::CommandFailed {
+                    command: "find version".to_string(),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: format!("No versions found with major version {}", major),
+                    working_dir: None,
+                },
+            )));
         }
 
         // Return the latest (first) matching version
@@ -827,11 +906,18 @@ impl RepositoryVersionResolver {
     }
 
     /// Get version by major.minor from GitLab
-    async fn get_gitlab_version_by_minor(&self, owner: &str, repo: &str, major: u32, minor: u32) -> Result<RepoVersion> {
+    async fn get_gitlab_version_by_minor(
+        &self,
+        owner: &str,
+        repo: &str,
+        major: u32,
+        minor: u32,
+    ) -> Result<RepoVersion> {
         let tags = self.list_gitlab_versions(owner, repo).await?;
-        
+
         // Find the latest version with matching major.minor version
-        let matching_versions: Vec<_> = tags.iter()
+        let matching_versions: Vec<_> = tags
+            .iter()
             .filter(|v| {
                 if let Some(version) = &v.version {
                     version.major == major as u64 && version.minor == minor as u64
@@ -842,13 +928,15 @@ impl RepositoryVersionResolver {
             .collect();
 
         if matching_versions.is_empty() {
-            return Err(SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: "find version".to_string(),
-                exit_code: None,
-                stdout: String::new(),
-                stderr: format!("No versions found with version {}.{}", major, minor),
-                working_dir: None,
-            })));
+            return Err(SnpError::Git(Box::new(
+                crate::error::GitError::CommandFailed {
+                    command: "find version".to_string(),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: format!("No versions found with version {}.{}", major, minor),
+                    working_dir: None,
+                },
+            )));
         }
 
         // Return the latest (first) matching version
@@ -859,29 +947,37 @@ impl RepositoryVersionResolver {
     async fn list_gitlab_versions(&self, owner: &str, repo: &str) -> Result<Vec<RepoVersion>> {
         let project_path = format!("{}/{}", owner, repo);
         let encoded_path = urlencoding::encode(&project_path);
-        let url = format!("https://gitlab.com/api/v4/projects/{}/repository/tags", encoded_path);
-        
-        let response = self.http_client
+        let url = format!(
+            "https://gitlab.com/api/v4/projects/{}/repository/tags",
+            encoded_path
+        );
+
+        let response = self
+            .http_client
             .get(&url)
             .query(&[("per_page", "100")]) // Get up to 100 tags
             .send()
             .await
-            .map_err(|e| SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: format!("GET {}", url),
-                exit_code: None,
-                stdout: String::new(),
-                stderr: format!("HTTP request failed: {}", e),
-                working_dir: None,
-            })))?;
+            .map_err(|e| {
+                SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
+                    command: format!("GET {}", url),
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: format!("HTTP request failed: {}", e),
+                    working_dir: None,
+                }))
+            })?;
 
         if !response.status().is_success() {
-            return Err(SnpError::Git(Box::new(crate::error::GitError::CommandFailed {
-                command: format!("GET {}", url),
-                exit_code: Some(response.status().as_u16() as i32),
-                stdout: String::new(),
-                stderr: format!("GitLab API returned status: {}", response.status()),
-                working_dir: None,
-            })));
+            return Err(SnpError::Git(Box::new(
+                crate::error::GitError::CommandFailed {
+                    command: format!("GET {}", url),
+                    exit_code: Some(response.status().as_u16() as i32),
+                    stdout: String::new(),
+                    stderr: format!("GitLab API returned status: {}", response.status()),
+                    working_dir: None,
+                },
+            )));
         }
 
         let tags: Vec<GitLabTag> = response.json().await.map_err(|e| {
@@ -907,8 +1003,15 @@ impl RepositoryVersionResolver {
     }
 
     /// Resolve version from Git repository (fallback for non-GitHub/GitLab repos)
-    async fn resolve_git_version(&self, repo_url: &str, strategy: &UpdateStrategy) -> Result<RepoVersion> {
-        debug!("Resolving Git version for {} with strategy {:?}", repo_url, strategy);
+    async fn resolve_git_version(
+        &self,
+        repo_url: &str,
+        strategy: &UpdateStrategy,
+    ) -> Result<RepoVersion> {
+        debug!(
+            "Resolving Git version for {} with strategy {:?}",
+            repo_url, strategy
+        );
 
         // This would use git2 to clone and inspect the repository
         // For now, return an error indicating this needs Git integration
