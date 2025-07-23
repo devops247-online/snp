@@ -26,6 +26,10 @@ pub struct Cli {
     /// Configuration file path
     #[arg(short, long, global = true, default_value = ".pre-commit-config.yaml")]
     pub config: String,
+
+    /// Control color output (auto, always, never)
+    #[arg(long, global = true, value_name = "WHEN")]
+    pub color: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -236,19 +240,14 @@ impl Cli {
     }
 
     fn init_logging(&self) {
-        use tracing_subscriber::{fmt, EnvFilter};
+        use crate::logging::{init_logging, LogConfig};
 
-        let level = if self.quiet {
-            "error"
-        } else if self.verbose {
-            "debug"
-        } else {
-            "info"
-        };
+        let log_config = LogConfig::from_cli(self.verbose, self.quiet, self.color.clone());
 
-        let filter = EnvFilter::new(format!("snp={level}"));
-
-        fmt().with_env_filter(filter).with_target(false).init();
+        if let Err(e) = init_logging(log_config) {
+            eprintln!("Failed to initialize logging: {e}");
+            // Continue execution even if logging fails
+        }
     }
 }
 
@@ -280,6 +279,7 @@ mod tests {
         assert_eq!(cli.config, ".pre-commit-config.yaml");
         assert!(!cli.verbose);
         assert!(!cli.quiet);
+        assert!(cli.color.is_none());
     }
 
     #[test]
@@ -298,5 +298,17 @@ mod tests {
             Some(Commands::Install { overwrite, .. }) => assert!(overwrite),
             _ => panic!("Expected Install command"),
         }
+    }
+
+    #[test]
+    fn test_cli_color_options() {
+        let cli_always = Cli::try_parse_from(["snp", "--color", "always"]).unwrap();
+        assert_eq!(cli_always.color, Some("always".to_string()));
+
+        let cli_never = Cli::try_parse_from(["snp", "--color", "never"]).unwrap();
+        assert_eq!(cli_never.color, Some("never".to_string()));
+
+        let cli_auto = Cli::try_parse_from(["snp", "--color", "auto"]).unwrap();
+        assert_eq!(cli_auto.color, Some("auto".to_string()));
     }
 }

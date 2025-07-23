@@ -212,6 +212,27 @@ impl ErrorFormatter {
 
     /// Format an error with context and colors
     pub fn format_error(&self, error: &SnpError) -> String {
+        // Log the error with structured context
+        use tracing::error;
+
+        match error {
+            SnpError::Config(_) => {
+                error!(error_type = "config", error = %error, "Configuration error occurred");
+            }
+            SnpError::Git(_) => {
+                error!(error_type = "git", error = %error, "Git operation failed");
+            }
+            SnpError::HookExecution(_) => {
+                error!(error_type = "hook_execution", error = %error, "Hook execution failed");
+            }
+            SnpError::Cli(_) => {
+                error!(error_type = "cli", error = %error, "CLI error occurred");
+            }
+            SnpError::Io(_) => {
+                error!(error_type = "io", error = %error, "IO operation failed");
+            }
+        }
+
         let mut output = String::new();
 
         if self.use_colors {

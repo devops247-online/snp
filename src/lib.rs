@@ -5,6 +5,7 @@ pub mod cli;
 pub mod config;
 pub mod core;
 pub mod error;
+pub mod logging;
 
 // Re-export main types for easier access
 pub use config::Config;
@@ -12,6 +13,7 @@ pub use core::{ExecutionContext, FileFilter, Hook, Repository, Stage};
 pub use error::{
     exit_codes, CliError, ConfigError, GitError, HookExecutionError, Result, SnpError,
 };
+pub use logging::{ColorConfig, LogConfig, LogFormat};
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

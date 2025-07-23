@@ -32,7 +32,7 @@ thiserror = "1.0"
 
 # Logging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 
 # Git operations
 git2 = "0.18"
@@ -44,6 +44,9 @@ tempfile = "3.8"
 
 # Process management
 which = "5.0"
+
+# Terminal detection
+is-terminal = "0.4"
 
 [dev-dependencies]
 # Testing utilities
@@ -71,4 +74,8 @@ harness = false
 
 [[bench]]
 name = "core_benchmark"
+harness = false
+
+[[bench]]
+name = "logging_benchmark"
 harness = false
