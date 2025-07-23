@@ -52,8 +52,9 @@ pub use hook_chaining::{
     HookChainExecutor, InterHookCommunication,
 };
 pub use install::{
-    BackupInfo, CleanupResult, GitHookManager, HookBackupManager, HookConfig, HookTemplateGenerator,
-    HookType, InstallConfig, InstallResult, RestoreInfo, UninstallConfig, UninstallResult,
+    BackupInfo, CleanupResult, GitHookManager, HookBackupManager, HookConfig,
+    HookTemplateGenerator, HookType, InstallConfig, InstallResult, RestoreInfo, UninstallConfig,
+    UninstallResult,
 };
 pub use language::{
     BaseLanguagePlugin, CommandBuilder, Dependency, DependencyConflict, DependencyManager,

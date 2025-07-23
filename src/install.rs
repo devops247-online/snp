@@ -23,8 +23,8 @@ pub enum HookType {
 }
 
 impl HookType {
-    /// Convert from string representation
-    pub fn from_str(s: &str) -> Result<Self> {
+    /// Parse hook type from string representation
+    pub fn parse(s: &str) -> Result<Self> {
         match s {
             "pre-commit" => Ok(HookType::PreCommit),
             "pre-push" => Ok(HookType::PrePush),
@@ -212,7 +212,9 @@ impl GitHookManager {
                     command: "validate config".to_string(),
                     exit_code: Some(1),
                     stdout: String::new(),
-                    stderr: "No .pre-commit-config.yaml found. Use --allow-missing-config to bypass.".to_string(),
+                    stderr:
+                        "No .pre-commit-config.yaml found. Use --allow-missing-config to bypass."
+                            .to_string(),
                     working_dir: Some(self.git_repo.root_path().to_path_buf()),
                 })));
             }
@@ -234,8 +236,8 @@ impl GitHookManager {
 
         // Install each hook type
         for hook_type_str in hook_types {
-            let hook_type = HookType::from_str(&hook_type_str)?;
-            
+            let hook_type = HookType::parse(&hook_type_str)?;
+
             match self.install_single_hook(&hook_type, config).await {
                 Ok((installed, backed_up, overwritten)) => {
                     if installed {
@@ -249,7 +251,9 @@ impl GitHookManager {
                     }
                 }
                 Err(e) => {
-                    result.warnings.push(format!("Failed to install {hook_type_str}: {e}"));
+                    result
+                        .warnings
+                        .push(format!("Failed to install {hook_type_str}: {e}"));
                 }
             }
         }
@@ -283,8 +287,8 @@ impl GitHookManager {
 
         // Uninstall each hook type
         for hook_type_str in hook_types {
-            let hook_type = HookType::from_str(&hook_type_str)?;
-            
+            let hook_type = HookType::parse(&hook_type_str)?;
+
             match self.uninstall_single_hook(&hook_type, config).await {
                 Ok((removed, restored)) => {
                     if removed {
@@ -295,7 +299,9 @@ impl GitHookManager {
                     }
                 }
                 Err(e) => {
-                    result.warnings.push(format!("Failed to uninstall {hook_type_str}: {e}"));
+                    result
+                        .warnings
+                        .push(format!("Failed to uninstall {hook_type_str}: {e}"));
                 }
             }
         }
@@ -304,10 +310,9 @@ impl GitHookManager {
         if config.clean_backups {
             match self.backup_manager.cleanup_backups(30).await {
                 Ok(cleanup_result) => {
-                    result.backups_cleaned.extend(
-                        (0..cleanup_result.cleaned_files)
-                            .map(|i| format!("backup_{i}"))
-                    );
+                    result
+                        .backups_cleaned
+                        .extend((0..cleanup_result.cleaned_files).map(|i| format!("backup_{i}")));
                 }
                 Err(e) => {
                     result.warnings.push(format!("Backup cleanup failed: {e}"));
@@ -340,7 +345,9 @@ impl GitHookManager {
         if self.git_repo.is_bare() {
             return Err(SnpError::Git(Box::new(GitError::RepositoryNotFound {
                 path: self.git_repo.root_path().to_path_buf(),
-                suggestion: Some("Bare repositories are not supported for pre-commit hooks".to_string()),
+                suggestion: Some(
+                    "Bare repositories are not supported for pre-commit hooks".to_string(),
+                ),
             })));
         }
 
@@ -369,12 +376,19 @@ impl GitHookManager {
         let mut backed_up = false;
         let mut overwritten = false;
 
-        debug!("Installing {} hook at {}", hook_type.as_str(), hook_path.display());
+        debug!(
+            "Installing {} hook at {}",
+            hook_type.as_str(),
+            hook_path.display()
+        );
 
         // Handle existing hook
         if hook_path.exists() {
             if self.is_snp_hook(&hook_path).await? {
-                info!("SNP hook already installed for {}, skipping", hook_type.as_str());
+                info!(
+                    "SNP hook already installed for {}, skipping",
+                    hook_type.as_str()
+                );
                 return Ok((false, false, false));
             }
 
@@ -390,14 +404,19 @@ impl GitHookManager {
                 overwritten = true;
             } else if config.backup_existing {
                 // Backup existing hook
-                self.backup_manager.backup_hook(hook_type.clone(), &hook_path).await?;
+                self.backup_manager
+                    .backup_hook(hook_type.clone(), &hook_path)
+                    .await?;
                 backed_up = true;
             } else {
                 return Err(SnpError::Git(Box::new(GitError::CommandFailed {
                     command: "install hook".to_string(),
                     exit_code: Some(1),
                     stdout: String::new(),
-                    stderr: format!("Hook {} already exists. Use --overwrite to replace it.", hook_type.as_str()),
+                    stderr: format!(
+                        "Hook {} already exists. Use --overwrite to replace it.",
+                        hook_type.as_str()
+                    ),
                     working_dir: Some(self.git_repo.root_path().to_path_buf()),
                 })));
             }
@@ -411,7 +430,9 @@ impl GitHookManager {
             additional_args: config.hook_args.clone(),
         };
 
-        let script = self.template_generator.generate_hook_script(hook_type.clone(), &hook_config)?;
+        let script = self
+            .template_generator
+            .generate_hook_script(hook_type.clone(), &hook_config)?;
 
         // Write hook script
         debug!("Writing hook script to: {}", hook_path.display());
@@ -452,8 +473,12 @@ impl GitHookManager {
         config: &UninstallConfig,
     ) -> Result<(bool, bool)> {
         let hook_path = self.git_repo.hook_path(hook_type.as_str());
-        
-        debug!("Uninstalling {} hook at {}", hook_type.as_str(), hook_path.display());
+
+        debug!(
+            "Uninstalling {} hook at {}",
+            hook_type.as_str(),
+            hook_path.display()
+        );
 
         // Check if hook exists and is ours
         if !hook_path.exists() {
@@ -476,7 +501,7 @@ impl GitHookManager {
         })?;
 
         let mut restored = false;
-        
+
         // Restore backup if requested and available
         if config.restore_backups {
             match self.backup_manager.restore_hook(hook_type.clone()).await {
@@ -485,7 +510,11 @@ impl GitHookManager {
                     info!("Restored backup for {} hook", hook_type.as_str());
                 }
                 Err(e) => {
-                    debug!("No backup to restore for {} hook: {}", hook_type.as_str(), e);
+                    debug!(
+                        "No backup to restore for {} hook: {}",
+                        hook_type.as_str(),
+                        e
+                    );
                 }
             }
         }
@@ -563,7 +592,11 @@ impl HookBackupManager {
             }))
         })?;
 
-        info!("Created backup for {} hook at {}", hook_type.as_str(), backup_path.display());
+        info!(
+            "Created backup for {} hook at {}",
+            hook_type.as_str(),
+            backup_path.display()
+        );
 
         Ok(BackupInfo {
             hook_type,
@@ -656,7 +689,8 @@ impl HookBackupManager {
             errors: Vec::new(),
         };
 
-        let cutoff_time = SystemTime::now() - std::time::Duration::from_secs(retention_days as u64 * 24 * 60 * 60);
+        let cutoff_time = SystemTime::now()
+            - std::time::Duration::from_secs(retention_days as u64 * 24 * 60 * 60);
 
         // Read hooks directory
         let entries = fs::read_dir(&self.hooks_dir).map_err(|_e| {
@@ -683,7 +717,7 @@ impl HookBackupManager {
             if file_name.ends_with(".legacy") {
                 if let Ok(metadata) = fs::metadata(&path) {
                     let modified_time = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-                    
+
                     if modified_time < cutoff_time {
                         match fs::remove_file(&path) {
                             Ok(()) => {
@@ -691,7 +725,11 @@ impl HookBackupManager {
                                 result.bytes_freed += metadata.len();
                             }
                             Err(e) => {
-                                result.errors.push(format!("Failed to remove {}: {}", path.display(), e));
+                                result.errors.push(format!(
+                                    "Failed to remove {}: {}",
+                                    path.display(),
+                                    e
+                                ));
                             }
                         }
                     }
@@ -699,13 +737,17 @@ impl HookBackupManager {
             }
         }
 
-        info!("Cleanup completed: {} files, {} bytes freed", result.cleaned_files, result.bytes_freed);
+        info!(
+            "Cleanup completed: {} files, {} bytes freed",
+            result.cleaned_files, result.bytes_freed
+        );
         Ok(result)
     }
 
     /// Get backup path for a hook type
     fn get_backup_path(&self, hook_type: &HookType) -> PathBuf {
-        self.hooks_dir.join(format!("{}.legacy", hook_type.as_str()))
+        self.hooks_dir
+            .join(format!("{}.legacy", hook_type.as_str()))
     }
 }
 
@@ -718,11 +760,11 @@ impl HookTemplateGenerator {
     /// Create a new HookTemplateGenerator
     pub fn new() -> Self {
         let mut templates = HashMap::new();
-        
+
         // Base template for all hooks
         let base_template = r#"#!/usr/bin/env bash
 # Generated by SNP (Shell Not Pass)
-# 
+#
 # This hook was installed by SNP to run pre-commit checks.
 # To skip this hook, use --no-verify or set SKIP=hook_name
 # To temporarily disable SNP, set PRE_COMMIT=0
@@ -765,10 +807,10 @@ exec "$SNP_BIN" run --hook-stage="{hook_stage}" {args} "$@"
         debug!("Generating hook script for {}", hook_type.as_str());
 
         let template = self.get_template(&hook_type)?;
-        
+
         // Replace placeholders
         let mut script = template.replace("{hook_stage}", hook_type.as_str());
-        
+
         // Add additional arguments
         let args = if config.additional_args.is_empty() {
             String::new()
@@ -781,7 +823,7 @@ exec "$SNP_BIN" run --hook-stage="{hook_stage}" {args} "$@"
         if config.config_file != ".pre-commit-config.yaml" {
             script = script.replace(
                 "exec \"$SNP_BIN\" run",
-                &format!("exec \"$SNP_BIN\" --config=\"{}\" run", config.config_file)
+                &format!("exec \"$SNP_BIN\" --config=\"{}\" run", config.config_file),
             );
         }
 
@@ -789,7 +831,7 @@ exec "$SNP_BIN" run --hook-stage="{hook_stage}" {args} "$@"
         if config.allow_missing_config {
             script = script.replace(
                 "exec \"$SNP_BIN\" run",
-                "exec \"$SNP_BIN\" run --allow-missing-config"
+                "exec \"$SNP_BIN\" run --allow-missing-config",
             );
         }
 
@@ -802,7 +844,9 @@ exec "$SNP_BIN" run --hook-stage="{hook_stage}" {args} "$@"
             SnpError::Git(Box::new(GitError::InvalidReference {
                 reference: hook_type.as_str().to_string(),
                 repository: "hook template".to_string(),
-                suggestion: Some("Supported hook types: pre-commit, pre-push, commit-msg, etc.".to_string()),
+                suggestion: Some(
+                    "Supported hook types: pre-commit, pre-push, commit-msg, etc.".to_string(),
+                ),
             }))
         })
     }
@@ -813,11 +857,11 @@ exec "$SNP_BIN" run --hook-stage="{hook_stage}" {args} "$@"
         if !script.contains("#!/usr/bin/env bash") {
             return Ok(false);
         }
-        
+
         if !script.contains("Generated by SNP") {
             return Ok(false);
         }
-        
+
         if !script.contains("exec \"$SNP_BIN\"") {
             return Ok(false);
         }

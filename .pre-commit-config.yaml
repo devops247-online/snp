@@ -1,80 +1,35 @@
 repos:
 - repo: local
   hooks:
-  - id: black
-    name: Black Code Formatter
-    entry: echo
-    language: system
-    args: ["Black formatting check passed"]
-    files: \.py$
-    always_run: true
-    stages: [commit]
-
   - id: cargo-fmt
     name: Format Rust code
-    entry: echo
+    entry: cargo fmt
     language: system
-    args: ["Rust formatting check passed"]
     types: [rust]
     pass_filenames: false
 
   - id: cargo-clippy
     name: Lint Rust code
-    entry: echo
+    entry: cargo clippy
     language: system
-    args: ["Rust linting passed"]
     types: [rust]
     pass_filenames: false
+    args: [--all-targets, --all-features, --, -D, warnings]
 
   - id: cargo-test
     name: Run Rust tests
-    entry: echo
+    entry: cargo test
     language: system
-    args: ["Rust tests passed"]
     types: [rust]
     pass_filenames: false
     stages: [pre-commit]
 
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v1.0.0
+  hooks:
   - id: trailing-whitespace
-    name: Trim Trailing Whitespace
-    entry: echo
-    language: system
-    args: ["Trailing whitespace check passed"]
-    types: [text]
-
   - id: end-of-file-fixer
-    name: Fix End of Files
-    entry: echo
-    language: system
-    args: ["End of file check passed"]
-    types: [text]
-
   - id: check-yaml
-    name: Check YAML
-    entry: echo
-    language: system
-    args: ["YAML check passed"]
-    files: \.ya?ml$
-    always_run: true
-
   - id: check-toml
-    name: Check TOML
-    entry: echo
-    language: system
-    args: ["TOML check passed"]
-    files: \.toml$
-    always_run: true
-
   - id: check-merge-conflict
-    name: Check Merge Conflict
-    entry: echo
-    language: system
-    args: ["Merge conflict check passed"]
-    types: [text]
-
   - id: check-case-conflict
-    name: Check Case Conflict
-    entry: echo
-    language: system
-    args: ["Case conflict check passed"]
-    types: [text]

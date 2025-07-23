@@ -468,6 +468,66 @@ impl Cli {
                 generate(*shell, &mut cmd, name, &mut std::io::stdout());
                 Ok(0)
             }
+            Some(Commands::Autoupdate {
+                bleeding_edge,
+                freeze,
+                repo,
+                jobs,
+            }) => {
+                // Get current directory as repository path
+                let repo_path = std::env::current_dir().map_err(|e| {
+                    crate::error::SnpError::Cli(Box::new(crate::error::CliError::RuntimeError {
+                        message: format!("Failed to get current directory: {e}"),
+                    }))
+                })?;
+
+                // Create autoupdate configuration
+                let autoupdate_config = crate::commands::autoupdate::AutoupdateConfig {
+                    bleeding_edge: *bleeding_edge,
+                    freeze: *freeze,
+                    specific_repos: repo.clone(),
+                    jobs: *jobs,
+                    dry_run: false, // TODO: Add dry_run flag to CLI
+                };
+
+                // Execute autoupdate command
+                let config_path = repo_path.join(&self.config);
+                let result = crate::commands::autoupdate::execute_autoupdate_command(
+                    &config_path,
+                    &autoupdate_config,
+                )
+                .await?;
+
+                // Report results
+                if !self.quiet {
+                    println!(
+                        "Processed {} repositories, {} updates available",
+                        result.repositories_processed, result.updates_available
+                    );
+                    println!(
+                        "Successful updates: {}, Failed updates: {}",
+                        result.successful_updates, result.failed_updates
+                    );
+
+                    if result.failed_updates > 0 {
+                        eprintln!("Some repositories failed to update:");
+                        for update in &result.update_results {
+                            if !update.success {
+                                if let Some(ref error) = update.error {
+                                    eprintln!("  {}: {}", update.repository_url, error);
+                                }
+                            }
+                        }
+                        Ok(1)
+                    } else {
+                        Ok(0)
+                    }
+                } else if result.failed_updates > 0 {
+                    Ok(1)
+                } else {
+                    Ok(0)
+                }
+            }
             // TODO: Implement all other commands
             _ => {
                 // Default to run command when no subcommand provided

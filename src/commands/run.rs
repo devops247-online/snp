@@ -20,17 +20,22 @@ pub async fn execute_run_command(
 ) -> Result<ExecutionResult> {
     // Initialize components
     let git_repo = GitRepository::discover_from_path(repo_path)?;
-    
+
     // Initialize storage with graceful fallback on failure
     let storage = match Store::new() {
         Ok(store) => Arc::new(store),
         Err(e) => {
-            tracing::warn!("Failed to initialize storage, continuing without caching: {}", e);
+            tracing::warn!(
+                "Failed to initialize storage, continuing without caching: {}",
+                e
+            );
             // Create a minimal dummy store that will fail operations gracefully
-            Arc::new(Store::with_cache_directory(tempfile::tempdir()?.path().to_path_buf())?)
+            Arc::new(Store::with_cache_directory(
+                tempfile::tempdir()?.path().to_path_buf(),
+            )?)
         }
     };
-    
+
     let process_manager = Arc::new(ProcessManager::new());
     let mut execution_engine = HookExecutionEngine::new(process_manager, storage);
 
@@ -105,8 +110,13 @@ pub async fn execute_run_command_single_hook(
     let storage = match Store::new() {
         Ok(store) => Arc::new(store),
         Err(e) => {
-            tracing::warn!("Failed to initialize storage, continuing without caching: {}", e);
-            Arc::new(Store::with_cache_directory(tempfile::tempdir()?.path().to_path_buf())?)
+            tracing::warn!(
+                "Failed to initialize storage, continuing without caching: {}",
+                e
+            );
+            Arc::new(Store::with_cache_directory(
+                tempfile::tempdir()?.path().to_path_buf(),
+            )?)
         }
     };
     let process_manager = Arc::new(ProcessManager::new());
