@@ -9,7 +9,7 @@ pub mod filesystem;
 pub mod git;
 pub mod logging;
 pub mod process;
-// pub mod storage;
+pub mod storage;
 
 // Re-export main types for easier access
 pub use config::Config;
@@ -24,7 +24,7 @@ pub use logging::{ColorConfig, LogConfig, LogFormat};
 pub use process::{
     OutputHandler, ProcessConfig, ProcessEnvironment, ProcessManager, ProcessResult,
 };
-// pub use storage::{ConfigInfo, EnvironmentInfo, RepositoryInfo, Store};
+pub use storage::{ConfigInfo, EnvironmentInfo, RepositoryInfo, Store};
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

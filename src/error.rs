@@ -638,36 +638,36 @@ impl From<git2::Error> for SnpError {
     }
 }
 
-// // Conversion from rusqlite::Error to StorageError
-// impl From<rusqlite::Error> for Box<StorageError> {
-//     fn from(error: rusqlite::Error) -> Self {
-//         match error {
-//             rusqlite::Error::SqliteFailure(sqlite_error, message) => {
-//                 Box::new(StorageError::QueryFailed {
-//                     query: "SQLite operation".to_string(),
-//                     error: message.unwrap_or_else(|| format!("SQLite error: {sqlite_error:?}")),
-//                     database_path: None,
-//                 })
-//             }
-//             rusqlite::Error::InvalidPath(path) => Box::new(StorageError::ConnectionFailed {
-//                 message: format!("Invalid database path: {}", path.display()),
-//                 database_path: Some(path),
-//             }),
-//             _ => Box::new(StorageError::QueryFailed {
-//                 query: "Database operation".to_string(),
-//                 error: error.to_string(),
-//                 database_path: None,
-//             }),
-//         }
-//     }
-// }
+// Conversion from rusqlite::Error to StorageError
+impl From<rusqlite::Error> for Box<StorageError> {
+    fn from(error: rusqlite::Error) -> Self {
+        match error {
+            rusqlite::Error::SqliteFailure(sqlite_error, message) => {
+                Box::new(StorageError::QueryFailed {
+                    query: "SQLite operation".to_string(),
+                    error: message.unwrap_or_else(|| format!("SQLite error: {sqlite_error:?}")),
+                    database_path: None,
+                })
+            }
+            rusqlite::Error::InvalidPath(path) => Box::new(StorageError::ConnectionFailed {
+                message: format!("Invalid database path: {}", path.display()),
+                database_path: Some(path),
+            }),
+            _ => Box::new(StorageError::QueryFailed {
+                query: "Database operation".to_string(),
+                error: error.to_string(),
+                database_path: None,
+            }),
+        }
+    }
+}
 
-// // Direct conversion from rusqlite::Error to SnpError
-// impl From<rusqlite::Error> for SnpError {
-//     fn from(error: rusqlite::Error) -> Self {
-//         SnpError::Storage(Box::<StorageError>::from(error))
-//     }
-// }
+// Direct conversion from rusqlite::Error to SnpError
+impl From<rusqlite::Error> for SnpError {
+    fn from(error: rusqlite::Error) -> Self {
+        SnpError::Storage(Box::<StorageError>::from(error))
+    }
+}
 
 #[cfg(test)]
 mod tests {

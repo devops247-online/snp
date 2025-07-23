@@ -653,6 +653,9 @@ impl Store {
         match result {
             Some(path) => {
                 if path.exists() {
+                    // Update last used timestamp
+                    drop(connection); // Release lock
+                    self.update_repository_last_used(url, revision, dependencies)?;
                     Ok(path)
                 } else {
                     Err(SnpError::Storage(Box::new(
@@ -798,7 +801,7 @@ impl Store {
         Ok(env_dir)
     }
 
-    /// Get a cached environment path
+    /// Get a cached environment path (updates last_used timestamp)
     pub fn get_environment(&self, language: &str, dependencies: &[String]) -> Result<PathBuf> {
         let connection = self.connection.lock().unwrap();
         let deps_json = Self::serialize_dependencies(dependencies);
@@ -817,7 +820,57 @@ impl Store {
         match result {
             Some(path) => {
                 if path.exists() {
+                    // Update last used timestamp
+                    drop(connection); // Release lock
+                    self.update_environment_last_used(language, dependencies)?;
                     Ok(path)
+                } else {
+                    Err(SnpError::Storage(Box::new(
+                        StorageError::EnvironmentNotFound {
+                            language: language.to_string(),
+                            dependencies: dependencies.to_vec(),
+                            suggestion: Some(
+                                "Environment directory was deleted. Try running the command again."
+                                    .to_string(),
+                            ),
+                        },
+                    )))
+                }
+            }
+            None => Err(SnpError::Storage(Box::new(
+                StorageError::EnvironmentNotFound {
+                    language: language.to_string(),
+                    dependencies: dependencies.to_vec(),
+                    suggestion: Some(
+                        "Environment not found in cache. It will be created on next use."
+                            .to_string(),
+                    ),
+                },
+            ))),
+        }
+    }
+
+    /// Get environment info with metadata
+    pub fn get_environment_info(
+        &self,
+        language: &str,
+        dependencies: &[String],
+    ) -> Result<EnvironmentInfo> {
+        let connection = self.connection.lock().unwrap();
+        let deps_json = Self::serialize_dependencies(dependencies);
+
+        let result = connection
+            .query_row(
+                "SELECT language, dependencies, path, last_used FROM environments WHERE language = ? AND dependencies = ?",
+                params![language, deps_json],
+                Self::row_to_environment_info,
+            )
+            .optional()?;
+
+        match result {
+            Some(env_info) => {
+                if env_info.path.exists() {
+                    Ok(env_info)
                 } else {
                     Err(SnpError::Storage(Box::new(
                         StorageError::EnvironmentNotFound {
@@ -998,7 +1051,7 @@ impl Store {
             Ok(PathBuf::from(path_str))
         })?;
 
-        let mut paths_to_delete = Vec::new();
+        let mut paths_to_delete: Vec<PathBuf> = Vec::new();
         for row in rows {
             paths_to_delete.push(row?);
         }
@@ -1049,7 +1102,7 @@ impl Store {
             Ok(PathBuf::from(path_str))
         })?;
 
-        let mut paths_to_delete = Vec::new();
+        let mut paths_to_delete: Vec<PathBuf> = Vec::new();
         for row in rows {
             paths_to_delete.push(row?);
         }

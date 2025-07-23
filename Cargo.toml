@@ -48,6 +48,8 @@ futures = "0.3"
 
 # Terminal detection
 is-terminal = "0.4"
+rusqlite = { version = "0.31", features = ["bundled"] }
+fs2 = "0.4"
 
 # Platform-specific process management
 [target.'cfg(unix)'.dependencies]
