@@ -11,6 +11,7 @@ pub mod execution;
 pub mod file_lock;
 pub mod filesystem;
 pub mod git;
+pub mod hook_chaining;
 pub mod logging;
 pub mod migration;
 pub mod output;
@@ -31,8 +32,8 @@ pub use concurrency::{
 pub use config::Config;
 pub use core::{ExecutionContext, Hook, Repository, Stage};
 pub use error::{
-    exit_codes, CliError, ConfigError, GitError, HookExecutionError, LockError, ProcessError,
-    Result, SnpError, StorageError,
+    exit_codes, CliError, ConfigError, GitError, HookChainingError, HookExecutionError, LockError,
+    ProcessError, Result, SnpError, StorageError,
 };
 pub use execution::{ExecutionConfig, ExecutionResult, HookExecutionEngine, HookExecutionResult};
 pub use file_lock::{
@@ -41,6 +42,12 @@ pub use file_lock::{
 };
 pub use filesystem::{FileFilter, FileSystem};
 pub use git::GitRepository;
+pub use hook_chaining::{
+    ChainExecutionResult, ChainedHook, ConditionContext, ConditionEvaluator,
+    CustomConditionEvaluator, DependencyGraph, DependencyResolver, ExecutionCondition,
+    ExecutionPlan, ExecutionStrategy, FailureBehavior, FailureStrategy, HookChain,
+    HookChainExecutor, InterHookCommunication,
+};
 pub use logging::{ColorConfig, LogConfig, LogFormat};
 pub use migration::{
     AppliedMigration, ConfigFormat, ConfigMigrator, FieldMigration, FieldTransformation,

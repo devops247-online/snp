@@ -1,5 +1,6 @@
 // Comprehensive error handling framework for SNP
 use std::path::PathBuf;
+use std::time::Duration;
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, SnpError>;
@@ -36,6 +37,9 @@ pub enum SnpError {
 
     #[error("Regex processing failed: {0}")]
     Regex(#[from] Box<crate::regex_processor::RegexError>),
+
+    #[error("Hook chaining failed: {0}")]
+    HookChaining(#[from] Box<HookChainingError>),
 }
 
 /// Configuration-related errors with detailed context
@@ -473,6 +477,9 @@ impl ErrorFormatter {
             SnpError::Regex(_) => {
                 error!(error_type = "regex", error = %error, "Regex processing failed");
             }
+            SnpError::HookChaining(_) => {
+                error!(error_type = "hook_chaining", error = %error, "Hook chaining failed");
+            }
         }
 
         let mut output = String::new();
@@ -516,6 +523,9 @@ impl ErrorFormatter {
             }
             SnpError::Regex(regex_err) => {
                 self.add_regex_context(&mut output, regex_err.as_ref());
+            }
+            SnpError::HookChaining(chaining_err) => {
+                self.add_hook_chaining_context(&mut output, chaining_err.as_ref());
             }
             _ => {}
         }
@@ -778,6 +788,111 @@ impl ErrorFormatter {
             }
         }
     }
+
+    fn add_hook_chaining_context(&self, output: &mut String, error: &HookChainingError) {
+        output.push('\n');
+        match error {
+            HookChainingError::CircularDependency {
+                cycle,
+                suggested_fix,
+            } => {
+                output.push_str(&format!("  Cycle: {}", cycle.join(" -> ")));
+                if let Some(suggestion) = suggested_fix {
+                    output.push_str(&format!("\n  Help: {suggestion}"));
+                }
+            }
+            HookChainingError::MissingDependency {
+                hook_id,
+                missing_dependency,
+                available_hooks,
+            } => {
+                output.push_str(&format!("  Hook: {hook_id}"));
+                output.push_str(&format!("\n  Missing: {missing_dependency}"));
+                output.push_str(&format!("\n  Available: {}", available_hooks.join(", ")));
+            }
+            HookChainingError::ChainTimeout {
+                duration,
+                completed_hooks,
+                running_hooks,
+            } => {
+                output.push_str(&format!("  Duration: {duration:?}"));
+                output.push_str(&format!("\n  Completed: {}", completed_hooks.join(", ")));
+                output.push_str(&format!("\n  Running: {}", running_hooks.join(", ")));
+            }
+            HookChainingError::CriticalHookFailure {
+                hook_id,
+                affected_dependents,
+                ..
+            } => {
+                output.push_str(&format!("  Failed hook: {hook_id}"));
+                output.push_str(&format!("\n  Affected: {}", affected_dependents.join(", ")));
+            }
+            HookChainingError::ConditionEvaluationFailed {
+                condition, hook_id, ..
+            } => {
+                output.push_str(&format!("  Hook: {hook_id}"));
+                output.push_str(&format!("\n  Condition: {condition}"));
+            }
+            HookChainingError::DependencyGraphFailed {
+                problematic_hooks, ..
+            } => {
+                output.push_str(&format!(
+                    "  Problematic hooks: {}",
+                    problematic_hooks.join(", ")
+                ));
+            }
+            HookChainingError::ExecutionPlanFailed { strategy, .. } => {
+                output.push_str(&format!("  Strategy: {strategy}"));
+            }
+        }
+    }
+}
+
+/// Hook chaining errors with detailed context
+#[derive(Debug, Error)]
+pub enum HookChainingError {
+    #[error("Circular dependency detected: {cycle:?}")]
+    CircularDependency {
+        cycle: Vec<String>,
+        suggested_fix: Option<String>,
+    },
+
+    #[error("Missing dependency: {hook_id} depends on {missing_dependency}")]
+    MissingDependency {
+        hook_id: String,
+        missing_dependency: String,
+        available_hooks: Vec<String>,
+    },
+
+    #[error("Chain execution timeout after {duration:?}")]
+    ChainTimeout {
+        duration: Duration,
+        completed_hooks: Vec<String>,
+        running_hooks: Vec<String>,
+    },
+
+    #[error("Critical hook failed: {hook_id}")]
+    CriticalHookFailure {
+        hook_id: String,
+        error: HookExecutionError,
+        affected_dependents: Vec<String>,
+    },
+
+    #[error("Condition evaluation failed: {condition}")]
+    ConditionEvaluationFailed {
+        condition: String,
+        hook_id: String,
+        error: String,
+    },
+
+    #[error("Dependency graph construction failed: {message}")]
+    DependencyGraphFailed {
+        message: String,
+        problematic_hooks: Vec<String>,
+    },
+
+    #[error("Execution plan creation failed: {message}")]
+    ExecutionPlanFailed { message: String, strategy: String },
 }
 
 /// Exit codes matching pre-commit behavior
@@ -828,6 +943,7 @@ impl SnpError {
             },
             SnpError::Classification(_) => exit_codes::GENERAL_ERROR,
             SnpError::Regex(_) => exit_codes::GENERAL_ERROR,
+            SnpError::HookChaining(_) => exit_codes::HOOK_FAILURE,
             SnpError::Io(_) => exit_codes::GENERAL_ERROR,
         }
     }
