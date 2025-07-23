@@ -21,6 +21,8 @@ async fn test_python_environment_creation() {
         environment_variables: HashMap::new(),
         isolation_level: IsolationLevel::Complete,
         cache_strategy: CacheStrategy::Both,
+        working_directory: None,
+        version: None,
     };
 
     // Test virtual environment creation
@@ -112,6 +114,8 @@ async fn test_python_version_detection_and_compatibility() {
         environment_variables: HashMap::new(),
         isolation_level: IsolationLevel::Complete,
         cache_strategy: CacheStrategy::Both,
+        working_directory: None,
+        version: None,
     };
 
     let result = plugin.setup_environment(&config).await;
@@ -139,6 +143,8 @@ async fn test_pip_dependency_management() {
         environment_variables: HashMap::new(),
         isolation_level: IsolationLevel::Complete,
         cache_strategy: CacheStrategy::Both,
+        working_directory: None,
+        version: None,
     };
 
     // Create environment
@@ -182,6 +188,8 @@ async fn test_python_hook_execution() {
         environment_variables: HashMap::new(),
         isolation_level: IsolationLevel::Complete,
         cache_strategy: CacheStrategy::Both,
+        working_directory: None,
+        version: None,
     };
 
     // Create environment
@@ -255,6 +263,8 @@ async fn test_performance_optimization() {
         environment_variables: HashMap::new(),
         isolation_level: IsolationLevel::Complete,
         cache_strategy: CacheStrategy::Both,
+        working_directory: None,
+        version: None,
     };
 
     // Test environment caching - first creation
@@ -300,6 +310,8 @@ async fn test_error_handling_and_recovery() {
         environment_variables: HashMap::new(),
         isolation_level: IsolationLevel::Complete,
         cache_strategy: CacheStrategy::Both,
+        working_directory: None,
+        version: None,
     };
 
     let result = plugin.setup_environment(&config).await;
@@ -332,6 +344,8 @@ async fn test_error_handling_and_recovery() {
         environment_variables: HashMap::new(),
         isolation_level: IsolationLevel::Complete,
         cache_strategy: CacheStrategy::Both,
+        working_directory: None,
+        version: None,
     };
 
     let env = plugin.setup_environment(&config).await;
@@ -396,6 +410,8 @@ async fn test_cross_platform_compatibility() {
         environment_variables: HashMap::new(),
         isolation_level: IsolationLevel::Complete,
         cache_strategy: CacheStrategy::Both,
+        working_directory: None,
+        version: None,
     };
 
     let env = plugin.setup_environment(&config).await;

@@ -66,6 +66,8 @@ impl LanguageHookExecutor {
             environment_variables: HashMap::new(),
             cache_strategy: super::environment::CacheStrategy::Both,
             isolation_level: super::environment::IsolationLevel::Partial,
+            working_directory: None,
+            version: hook.minimum_pre_commit_version.clone(),
         };
 
         let env = {

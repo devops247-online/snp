@@ -30,6 +30,8 @@ pub struct EnvironmentConfig {
     pub environment_variables: HashMap<String, String>,
     pub cache_strategy: CacheStrategy,
     pub isolation_level: IsolationLevel,
+    pub working_directory: Option<PathBuf>,
+    pub version: Option<String>, // Alias for language_version for compatibility
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -327,6 +329,8 @@ impl Default for EnvironmentConfig {
             environment_variables: HashMap::new(),
             cache_strategy: CacheStrategy::Both,
             isolation_level: IsolationLevel::Partial,
+            working_directory: None,
+            version: None,
         }
     }
 }
@@ -353,6 +357,17 @@ impl EnvironmentConfig {
 
     pub fn with_isolation(mut self, level: IsolationLevel) -> Self {
         self.isolation_level = level;
+        self
+    }
+
+    pub fn with_working_directory(mut self, dir: PathBuf) -> Self {
+        self.working_directory = Some(dir);
+        self.version = self.version.or_else(|| self.language_version.clone());
+        self
+    }
+
+    pub fn with_environment_variables(mut self, env_vars: HashMap<String, String>) -> Self {
+        self.environment_variables = env_vars;
         self
     }
 }

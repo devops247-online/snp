@@ -1019,6 +1019,49 @@ impl From<rusqlite::Error> for SnpError {
     }
 }
 
+// Additional error conversions for language plugins
+impl From<which::Error> for SnpError {
+    fn from(err: which::Error) -> Self {
+        SnpError::Process(Box::new(ProcessError::CommandNotFound {
+            command: "unknown".to_string(),
+            suggestion: Some(format!("Command lookup failed: {err}")),
+        }))
+    }
+}
+
+impl From<toml::de::Error> for SnpError {
+    fn from(err: toml::de::Error) -> Self {
+        SnpError::Config(Box::new(ConfigError::InvalidYaml {
+            message: format!("TOML parsing error: {err}"),
+            line: None,
+            column: None,
+            file_path: None,
+        }))
+    }
+}
+
+impl From<semver::Error> for SnpError {
+    fn from(err: semver::Error) -> Self {
+        SnpError::Config(Box::new(ConfigError::ValidationFailed {
+            message: format!("Version parsing error: {err}"),
+            file_path: None,
+            errors: vec![],
+        }))
+    }
+}
+
+impl From<regex::Error> for SnpError {
+    fn from(err: regex::Error) -> Self {
+        SnpError::Regex(Box::new(
+            crate::regex_processor::RegexError::InvalidPattern {
+                pattern: "unknown".to_string(),
+                error: err,
+                suggestion: None,
+            },
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

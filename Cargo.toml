@@ -82,6 +82,7 @@ infer = "0.15"
 # Process management
 which = "5.0"
 futures = "0.3"
+dirs = "5.0"          # Home directory discovery for CARGO_HOME/RUSTUP_HOME
 
 # Python language support dependencies
 pep440_rs = "0.6"        # PEP 440 version specifier parsing

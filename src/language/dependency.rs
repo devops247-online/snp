@@ -176,6 +176,11 @@ impl Dependency {
         self
     }
 
+    pub fn with_features(mut self, features: Vec<String>) -> Self {
+        self.extras = features;
+        self
+    }
+
     pub fn parse_spec(spec: &str) -> Result<Self> {
         // Simple parsing for now - can be extended
         if let Some((name, version)) = spec.split_once("==") {
@@ -184,6 +189,23 @@ impl Dependency {
             Ok(Self::new(name.trim()).with_version_range(Some(version.trim().to_string()), None))
         } else {
             Ok(Self::new(spec.trim()))
+        }
+    }
+}
+
+impl std::fmt::Display for VersionSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VersionSpec::Any => write!(f, "*"),
+            VersionSpec::Exact(v) => write!(f, "{v}"),
+            VersionSpec::Range { min, max } => match (min, max) {
+                (Some(min), Some(max)) => write!(f, ">={min},<={max}"),
+                (Some(min), None) => write!(f, ">={min}"),
+                (None, Some(max)) => write!(f, "<={max}"),
+                (None, None) => write!(f, "*"),
+            },
+            VersionSpec::Compatible(v) => write!(f, "~{v}"),
+            VersionSpec::Exclude(versions) => write!(f, "!{}", versions.join(",")),
         }
     }
 }

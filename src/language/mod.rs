@@ -7,6 +7,7 @@ pub mod environment;
 pub mod executor;
 pub mod python;
 pub mod registry;
+pub mod rust;
 pub mod system;
 pub mod traits;
 
@@ -23,6 +24,7 @@ pub use environment::{
 pub use executor::{ExecutionCache, LanguageHookExecutor};
 pub use python::PythonLanguagePlugin;
 pub use registry::{LanguageRegistry, PluginMetadata};
+pub use rust::RustLanguagePlugin;
 pub use system::SystemLanguagePlugin;
 pub use traits::{Language, LanguageError};
 
