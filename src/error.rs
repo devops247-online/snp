@@ -27,6 +27,9 @@ pub enum SnpError {
 
     #[error("Process execution failed: {0}")]
     Process(#[from] Box<ProcessError>),
+
+    #[error("File locking failed: {0}")]
+    Lock(#[from] Box<LockError>),
 }
 
 /// Configuration-related errors with detailed context
@@ -341,6 +344,68 @@ pub enum ProcessError {
     TerminationFailed { command: String, error: String },
 }
 
+/// File locking errors with detailed context
+#[derive(Debug, Error)]
+pub enum LockError {
+    #[error("Lock acquisition timeout: {path}")]
+    Timeout {
+        path: PathBuf,
+        timeout: std::time::Duration,
+        lock_type: crate::file_lock::LockType,
+    },
+
+    #[error("Lock acquisition failed: {path}")]
+    AcquisitionFailed {
+        path: PathBuf,
+        error: String,
+        lock_type: crate::file_lock::LockType,
+    },
+
+    #[error("Deadlock detected in lock hierarchy: {paths:?}")]
+    DeadlockDetected {
+        paths: Vec<PathBuf>,
+        current_order: Vec<u32>,
+    },
+
+    #[error("Stale lock cleanup failed: {path}")]
+    StaleCleanupFailed {
+        path: PathBuf,
+        process_id: u32,
+        error: String,
+    },
+
+    #[error(
+        "Lock hierarchy violation: {path} level {level} < {previous_path} level {previous_level}"
+    )]
+    HierarchyViolation {
+        path: PathBuf,
+        level: u32,
+        previous_path: PathBuf,
+        previous_level: u32,
+    },
+
+    #[error("Unsupported lock operation: {operation}")]
+    UnsupportedOperation {
+        operation: String,
+        platform: String,
+        suggestion: Option<String>,
+    },
+
+    #[error("Platform-specific lock error on {platform}: {operation}")]
+    PlatformSpecific {
+        platform: String,
+        operation: String,
+        error: String,
+    },
+
+    #[error("Lock contention detected: {path}")]
+    LockContention {
+        path: PathBuf,
+        waiting_processes: u32,
+        estimated_wait: std::time::Duration,
+    },
+}
+
 /// Format errors with colors and context
 pub struct ErrorFormatter {
     use_colors: bool,
@@ -374,6 +439,9 @@ impl ErrorFormatter {
             }
             SnpError::Process(_) => {
                 error!(error_type = "process", error = %error, "Process execution failed");
+            }
+            SnpError::Lock(_) => {
+                error!(error_type = "lock", error = %error, "File locking failed");
             }
             SnpError::Io(_) => {
                 error!(error_type = "io", error = %error, "IO operation failed");
@@ -412,6 +480,9 @@ impl ErrorFormatter {
             }
             SnpError::Process(process_err) => {
                 self.add_process_context(&mut output, process_err.as_ref());
+            }
+            SnpError::Lock(lock_err) => {
+                self.add_lock_context(&mut output, lock_err.as_ref());
             }
             _ => {}
         }
@@ -553,6 +624,55 @@ impl ErrorFormatter {
             _ => {}
         }
     }
+
+    fn add_lock_context(&self, output: &mut String, error: &LockError) {
+        match error {
+            LockError::Timeout { timeout, .. } => {
+                output.push_str(&format!("\n  Timeout: {timeout:?}"));
+                output.push_str(
+                    "\n  Help: Consider increasing the lock timeout or checking for deadlocks",
+                );
+            }
+            LockError::HierarchyViolation {
+                level,
+                previous_level,
+                ..
+            } => {
+                output.push_str(&format!(
+                    "\n  Lock levels: attempting {level} after {previous_level}"
+                ));
+                output.push_str("\n  Help: Acquire locks in consistent hierarchical order");
+            }
+            LockError::StaleCleanupFailed { process_id, .. } => {
+                output.push_str(&format!("\n  Stale process ID: {process_id}"));
+                output.push_str(
+                    "\n  Help: Try running with elevated privileges or restart the application",
+                );
+            }
+            LockError::UnsupportedOperation {
+                suggestion: Some(suggestion),
+                ..
+            } => {
+                output.push_str(&format!("\n  Help: {suggestion}"));
+            }
+            LockError::PlatformSpecific {
+                platform,
+                operation,
+                ..
+            } => {
+                output.push_str(&format!("\n  Platform: {platform} operation: {operation}"));
+            }
+            LockError::LockContention {
+                waiting_processes,
+                estimated_wait,
+                ..
+            } => {
+                output.push_str(&format!("\n  Waiting processes: {waiting_processes}"));
+                output.push_str(&format!("\n  Estimated wait: {estimated_wait:?}"));
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Exit codes matching pre-commit behavior
@@ -567,6 +687,7 @@ pub mod exit_codes {
     pub const CLI_ERROR: i32 = 7;
     pub const STORAGE_ERROR: i32 = 8;
     pub const PROCESS_ERROR: i32 = 9;
+    pub const LOCK_ERROR: i32 = 10;
 }
 
 impl SnpError {
@@ -593,6 +714,12 @@ impl SnpError {
             SnpError::Process(process_err) => match process_err.as_ref() {
                 ProcessError::Timeout { .. } => exit_codes::TIMEOUT_ERROR,
                 _ => exit_codes::PROCESS_ERROR,
+            },
+            SnpError::Lock(lock_err) => match lock_err.as_ref() {
+                LockError::Timeout { .. } => exit_codes::TIMEOUT_ERROR,
+                LockError::HierarchyViolation { .. } => exit_codes::LOCK_ERROR,
+                LockError::StaleCleanupFailed { .. } => exit_codes::PERMISSION_ERROR,
+                _ => exit_codes::LOCK_ERROR,
             },
             _ => exit_codes::GENERAL_ERROR,
         }

@@ -52,25 +52,26 @@ rayon = "1.7"
 
 # System monitoring
 sysinfo = "0.30"
+whoami = "1.4"
 
 # Terminal detection
 is-terminal = "0.4"
-rusqlite = { version = "0.31", features = ["bundled"] }
+
+# File locking and monitoring
 fs2 = "0.4"
-
-# Platform-specific process management
-[target.'cfg(unix)'.dependencies]
-nix = { version = "0.27", features = ["process", "signal"] }
-libc = "0.2"
-
-[target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["processthreadsapi", "winbase", "handleapi", "synchapi"] }
+file-lock = "2.1"
+notify = "6.1"
 
 # Database storage
 rusqlite = { version = "0.31", features = ["bundled"] }
 
-# File locking
-fs2 = "0.4"
+# Platform-specific process management
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.27", features = ["process", "signal", "fs"] }
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["processthreadsapi", "winbase", "handleapi", "synchapi", "fileapi"] }
 
 [dev-dependencies]
 # Testing utilities

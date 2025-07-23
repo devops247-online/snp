@@ -6,6 +6,7 @@ pub mod concurrency;
 pub mod config;
 pub mod core;
 pub mod error;
+pub mod file_lock;
 pub mod filesystem;
 pub mod git;
 pub mod logging;
@@ -20,8 +21,12 @@ pub use concurrency::{
 pub use config::Config;
 pub use core::{ExecutionContext, Hook, Repository, Stage};
 pub use error::{
-    exit_codes, CliError, ConfigError, GitError, HookExecutionError, ProcessError, Result,
-    SnpError, StorageError,
+    exit_codes, CliError, ConfigError, GitError, HookExecutionError, LockError, ProcessError,
+    Result, SnpError, StorageError,
+};
+pub use file_lock::{
+    ConfigFileLock, FileLock, FileLockManager, LockBehavior, LockConfig, LockHierarchy, LockInfo,
+    LockMetrics, LockOrdering, LockStatus, LockType, StaleLockDetector, TempFileLock,
 };
 pub use filesystem::{FileFilter, FileSystem};
 pub use git::GitRepository;
