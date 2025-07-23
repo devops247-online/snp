@@ -12,6 +12,7 @@ pub mod git;
 pub mod logging;
 pub mod process;
 pub mod storage;
+pub mod validation;
 
 // Re-export main types for easier access
 pub use concurrency::{
@@ -35,6 +36,10 @@ pub use process::{
     OutputHandler, ProcessConfig, ProcessEnvironment, ProcessManager, ProcessResult,
 };
 pub use storage::{ConfigInfo, EnvironmentInfo, RepositoryInfo, Store};
+pub use validation::{
+    PerformanceImpact, PerformanceIssue, PerformanceMetrics, PerformanceWarning, SchemaValidator,
+    ValidationConfig, ValidationError, ValidationErrorType, ValidationResult, ValidationWarning,
+};
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
