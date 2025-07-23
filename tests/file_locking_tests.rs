@@ -516,4 +516,3 @@ fn test_lock_ordering_utilities() {
         assert!(inode_result.is_ok(), "Should be able to order by inode");
     }
 }
-
