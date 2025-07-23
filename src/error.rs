@@ -24,6 +24,9 @@ pub enum SnpError {
 
     #[error("Storage operation failed: {0}")]
     Storage(#[from] Box<StorageError>),
+
+    #[error("Process execution failed: {0}")]
+    Process(#[from] Box<ProcessError>),
 }
 
 /// Configuration-related errors with detailed context
@@ -283,6 +286,61 @@ pub enum StorageError {
     },
 }
 
+/// Process execution errors with detailed context
+#[derive(Debug, Error)]
+pub enum ProcessError {
+    #[error("Process execution failed: {command}")]
+    ExecutionFailed {
+        command: String,
+        exit_code: Option<i32>,
+        stderr: String,
+    },
+
+    #[error("Process timeout after {duration:?}: {command}")]
+    Timeout {
+        command: String,
+        duration: std::time::Duration,
+    },
+
+    #[error("Resource limit exceeded: {limit_type}")]
+    ResourceLimitExceeded {
+        limit_type: String,
+        current_value: u64,
+        limit_value: u64,
+    },
+
+    #[error("Signal handling failed: {signal}")]
+    SignalError { signal: String, error: String },
+
+    #[error("Command not found: {command}")]
+    CommandNotFound {
+        command: String,
+        suggestion: Option<String>,
+    },
+
+    #[error("Environment setup failed: {message}")]
+    EnvironmentSetupFailed {
+        message: String,
+        variable: Option<String>,
+    },
+
+    #[error("Process spawn failed: {command}")]
+    SpawnFailed { command: String, error: String },
+
+    #[error("Output capture failed: {message}")]
+    OutputCaptureFailed { message: String, command: String },
+
+    #[error("Parallel execution failed: {failed_count} of {total_count} processes failed")]
+    ParallelExecutionFailed {
+        failed_count: usize,
+        total_count: usize,
+        errors: Vec<String>,
+    },
+
+    #[error("Process termination failed: {command}")]
+    TerminationFailed { command: String, error: String },
+}
+
 /// Format errors with colors and context
 pub struct ErrorFormatter {
     use_colors: bool,
@@ -313,6 +371,9 @@ impl ErrorFormatter {
             }
             SnpError::Storage(_) => {
                 error!(error_type = "storage", error = %error, "Storage operation failed");
+            }
+            SnpError::Process(_) => {
+                error!(error_type = "process", error = %error, "Process execution failed");
             }
             SnpError::Io(_) => {
                 error!(error_type = "io", error = %error, "IO operation failed");
@@ -348,6 +409,9 @@ impl ErrorFormatter {
             }
             SnpError::Storage(storage_err) => {
                 self.add_storage_context(&mut output, storage_err.as_ref());
+            }
+            SnpError::Process(process_err) => {
+                self.add_process_context(&mut output, process_err.as_ref());
             }
             _ => {}
         }
@@ -466,6 +530,29 @@ impl ErrorFormatter {
             _ => {}
         }
     }
+
+    fn add_process_context(&self, output: &mut String, error: &ProcessError) {
+        match error {
+            ProcessError::CommandNotFound {
+                suggestion: Some(suggestion),
+                ..
+            } => {
+                output.push_str(&format!("\n  Help: {suggestion}"));
+            }
+            ProcessError::Timeout { duration, .. } => {
+                output.push_str(&format!("\n  Timeout: {duration:?}"));
+            }
+            ProcessError::ExecutionFailed { stderr, .. } if !stderr.is_empty() => {
+                output.push_str(&format!("\n  Process error: {stderr}"));
+            }
+            ProcessError::ParallelExecutionFailed { errors, .. } => {
+                for (i, error) in errors.iter().enumerate() {
+                    output.push_str(&format!("\n    {}: {}", i + 1, error));
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Exit codes matching pre-commit behavior
@@ -479,6 +566,7 @@ pub mod exit_codes {
     pub const TIMEOUT_ERROR: i32 = 6;
     pub const CLI_ERROR: i32 = 7;
     pub const STORAGE_ERROR: i32 = 8;
+    pub const PROCESS_ERROR: i32 = 9;
 }
 
 impl SnpError {
@@ -501,6 +589,10 @@ impl SnpError {
                 StorageError::FileLockFailed { .. } => exit_codes::TIMEOUT_ERROR,
                 StorageError::CacheDirectoryFailed { .. } => exit_codes::PERMISSION_ERROR,
                 _ => exit_codes::STORAGE_ERROR,
+            },
+            SnpError::Process(process_err) => match process_err.as_ref() {
+                ProcessError::Timeout { .. } => exit_codes::TIMEOUT_ERROR,
+                _ => exit_codes::PROCESS_ERROR,
             },
             _ => exit_codes::GENERAL_ERROR,
         }
@@ -546,36 +638,36 @@ impl From<git2::Error> for SnpError {
     }
 }
 
-// Conversion from rusqlite::Error to StorageError
-impl From<rusqlite::Error> for Box<StorageError> {
-    fn from(error: rusqlite::Error) -> Self {
-        match error {
-            rusqlite::Error::SqliteFailure(sqlite_error, message) => {
-                Box::new(StorageError::QueryFailed {
-                    query: "SQLite operation".to_string(),
-                    error: message.unwrap_or_else(|| format!("SQLite error: {sqlite_error:?}")),
-                    database_path: None,
-                })
-            }
-            rusqlite::Error::InvalidPath(path) => Box::new(StorageError::ConnectionFailed {
-                message: format!("Invalid database path: {}", path.display()),
-                database_path: Some(path),
-            }),
-            _ => Box::new(StorageError::QueryFailed {
-                query: "Database operation".to_string(),
-                error: error.to_string(),
-                database_path: None,
-            }),
-        }
-    }
-}
+// // Conversion from rusqlite::Error to StorageError
+// impl From<rusqlite::Error> for Box<StorageError> {
+//     fn from(error: rusqlite::Error) -> Self {
+//         match error {
+//             rusqlite::Error::SqliteFailure(sqlite_error, message) => {
+//                 Box::new(StorageError::QueryFailed {
+//                     query: "SQLite operation".to_string(),
+//                     error: message.unwrap_or_else(|| format!("SQLite error: {sqlite_error:?}")),
+//                     database_path: None,
+//                 })
+//             }
+//             rusqlite::Error::InvalidPath(path) => Box::new(StorageError::ConnectionFailed {
+//                 message: format!("Invalid database path: {}", path.display()),
+//                 database_path: Some(path),
+//             }),
+//             _ => Box::new(StorageError::QueryFailed {
+//                 query: "Database operation".to_string(),
+//                 error: error.to_string(),
+//                 database_path: None,
+//             }),
+//         }
+//     }
+// }
 
-// Direct conversion from rusqlite::Error to SnpError
-impl From<rusqlite::Error> for SnpError {
-    fn from(error: rusqlite::Error) -> Self {
-        SnpError::Storage(Box::<StorageError>::from(error))
-    }
-}
+// // Direct conversion from rusqlite::Error to SnpError
+// impl From<rusqlite::Error> for SnpError {
+//     fn from(error: rusqlite::Error) -> Self {
+//         SnpError::Storage(Box::<StorageError>::from(error))
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

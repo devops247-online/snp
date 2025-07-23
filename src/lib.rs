@@ -8,18 +8,23 @@ pub mod error;
 pub mod filesystem;
 pub mod git;
 pub mod logging;
-pub mod storage;
+pub mod process;
+// pub mod storage;
 
 // Re-export main types for easier access
 pub use config::Config;
 pub use core::{ExecutionContext, Hook, Repository, Stage};
 pub use error::{
-    exit_codes, CliError, ConfigError, GitError, HookExecutionError, Result, SnpError, StorageError,
+    exit_codes, CliError, ConfigError, GitError, HookExecutionError, ProcessError, Result,
+    SnpError, StorageError,
 };
 pub use filesystem::{FileFilter, FileSystem};
 pub use git::GitRepository;
 pub use logging::{ColorConfig, LogConfig, LogFormat};
-pub use storage::{ConfigInfo, EnvironmentInfo, RepositoryInfo, Store};
+pub use process::{
+    OutputHandler, ProcessConfig, ProcessEnvironment, ProcessManager, ProcessResult,
+};
+// pub use storage::{ConfigInfo, EnvironmentInfo, RepositoryInfo, Store};
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
