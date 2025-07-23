@@ -30,6 +30,9 @@ pub enum SnpError {
 
     #[error("File locking failed: {0}")]
     Lock(#[from] Box<LockError>),
+
+    #[error("File classification failed: {0}")]
+    Classification(crate::classification::ClassificationError),
 }
 
 /// Configuration-related errors with detailed context
@@ -446,6 +449,9 @@ impl ErrorFormatter {
             SnpError::Io(_) => {
                 error!(error_type = "io", error = %error, "IO operation failed");
             }
+            SnpError::Classification(_) => {
+                error!(error_type = "classification", error = %error, "File classification failed");
+            }
         }
 
         let mut output = String::new();
@@ -483,6 +489,9 @@ impl ErrorFormatter {
             }
             SnpError::Lock(lock_err) => {
                 self.add_lock_context(&mut output, lock_err.as_ref());
+            }
+            SnpError::Classification(classification_err) => {
+                self.add_classification_context(&mut output, classification_err);
             }
             _ => {}
         }
@@ -673,6 +682,33 @@ impl ErrorFormatter {
             _ => {}
         }
     }
+
+    fn add_classification_context(
+        &self,
+        output: &mut String,
+        error: &crate::classification::ClassificationError,
+    ) {
+        output.push('\n');
+        match error {
+            crate::classification::ClassificationError::InvalidPattern { pattern, .. } => {
+                output.push_str(&format!("  Pattern: {pattern}"));
+            }
+            crate::classification::ClassificationError::FileAccessError { path, .. } => {
+                output.push_str(&format!("  File: {}", path.display()));
+            }
+            crate::classification::ClassificationError::ContentAnalysisError {
+                path,
+                analyzer,
+                ..
+            } => {
+                output.push_str(&format!("  File: {}", path.display()));
+                output.push_str(&format!("\n  Analyzer: {analyzer}"));
+            }
+            crate::classification::ClassificationError::EncodingError { path, .. } => {
+                output.push_str(&format!("  File: {}", path.display()));
+            }
+        }
+    }
 }
 
 /// Exit codes matching pre-commit behavior
@@ -721,7 +757,8 @@ impl SnpError {
                 LockError::StaleCleanupFailed { .. } => exit_codes::PERMISSION_ERROR,
                 _ => exit_codes::LOCK_ERROR,
             },
-            _ => exit_codes::GENERAL_ERROR,
+            SnpError::Classification(_) => exit_codes::GENERAL_ERROR,
+            SnpError::Io(_) => exit_codes::GENERAL_ERROR,
         }
     }
 

@@ -1,6 +1,7 @@
 // SNP (Shell Not Pass) - Library module
 // This file contains the core library functionality
 
+pub mod classification;
 pub mod cli;
 pub mod concurrency;
 pub mod config;
@@ -15,6 +16,10 @@ pub mod storage;
 pub mod validation;
 
 // Re-export main types for easier access
+pub use classification::{
+    ClassificationError, DetectionMethod, FileClassification, FileClassifier, FileType,
+    LanguageDefinitions, LanguageDetection,
+};
 pub use concurrency::{
     BatchResult, ConcurrencyExecutor, ErrorAggregator, ResourceGuard, ResourceLimits,
     ResourceRequirements, ResourceUsage, TaskConfig, TaskPriority, TaskResult, TaskState,
