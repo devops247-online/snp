@@ -2,7 +2,12 @@
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 
+use crate::commands::run;
+use crate::core::Stage;
 use crate::error::Result;
+use crate::execution::ExecutionConfig;
+use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Parser)]
 #[command(
@@ -55,6 +60,22 @@ pub enum Commands {
         /// Hook stage to run
         #[arg(long, default_value = "pre-commit")]
         hook_stage: String,
+
+        /// Source ref to use for determining changed files
+        #[arg(long)]
+        from_ref: Option<String>,
+
+        /// Target ref to use for determining changed files
+        #[arg(long)]
+        to_ref: Option<String>,
+
+        /// Enable verbose output
+        #[arg(short, long)]
+        verbose: bool,
+
+        /// Fail fast - stop running hooks after first failure
+        #[arg(long)]
+        fail_fast: bool,
     },
 
     /// Install the pre-commit script
@@ -184,12 +205,28 @@ impl Cli {
             )));
         }
 
+        // Use tokio runtime for async operations
+        let rt = tokio::runtime::Runtime::new().map_err(|e| {
+            crate::error::SnpError::Cli(Box::new(crate::error::CliError::RuntimeError {
+                message: format!("Failed to create async runtime: {e}"),
+            }))
+        })?;
+
+        rt.block_on(self.run_async())
+    }
+
+    async fn run_async(&self) -> Result<i32> {
         match &self.command {
             Some(Commands::Run {
                 hook,
                 all_files,
                 files,
-                ..
+                from_ref,
+                to_ref,
+                verbose,
+                fail_fast,
+                show_diff_on_failure: _,
+                hook_stage,
             }) => {
                 // Validate run command arguments
                 if *all_files && !files.is_empty() {
@@ -202,17 +239,118 @@ impl Cli {
                     )));
                 }
 
-                if let Some(hook_id) = hook {
+                // Validate from-ref/to-ref arguments
+                if from_ref.is_some() != to_ref.is_some() {
+                    return Err(crate::error::SnpError::Cli(Box::new(
+                        crate::error::CliError::ConflictingArguments {
+                            first: "--from-ref".to_string(),
+                            second: "--to-ref".to_string(),
+                            suggestion: "Both --from-ref and --to-ref must be specified together"
+                                .to_string(),
+                        },
+                    )));
+                }
+
+                // Parse stage
+                let stage = match hook_stage.as_str() {
+                    "pre-commit" | "commit" => Stage::PreCommit,
+                    "pre-push" | "push" => Stage::PrePush,
+                    _ => {
+                        return Err(crate::error::SnpError::Cli(Box::new(
+                            crate::error::CliError::InvalidArgument {
+                                argument: "--hook-stage".to_string(),
+                                value: hook_stage.clone(),
+                                suggestion: "Valid stages are: pre-commit, pre-push".to_string(),
+                            },
+                        )));
+                    }
+                };
+
+                // Get current directory as repository path
+                let repo_path = std::env::current_dir().map_err(|e| {
+                    crate::error::SnpError::Cli(Box::new(crate::error::CliError::RuntimeError {
+                        message: format!("Failed to get current directory: {e}"),
+                    }))
+                })?;
+
+                // Create execution configuration
+                let mut execution_config = ExecutionConfig::new(stage)
+                    .with_verbose(*verbose || self.verbose)
+                    .with_fail_fast(*fail_fast)
+                    .with_hook_timeout(Duration::from_secs(60));
+
+                // Execute based on command type
+                let execution_result = if let Some(hook_id) = hook {
                     println!("Running hook: {hook_id}");
+                    run::execute_run_command_single_hook(
+                        &repo_path,
+                        &self.config,
+                        hook_id,
+                        &execution_config,
+                    )
+                    .await?
                 } else if *all_files {
                     println!("Running hooks on all files");
+                    execution_config = execution_config.with_all_files(true);
+                    run::execute_run_command_all_files(&repo_path, &self.config, &execution_config)
+                        .await?
                 } else if !files.is_empty() {
                     println!("Running hooks on {} specific files", files.len());
+                    let file_paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
+                    execution_config = execution_config.with_files(file_paths);
+                    run::execute_run_command_with_files(&repo_path, &self.config, &execution_config)
+                        .await?
+                } else if let (Some(from), Some(to)) = (from_ref, to_ref) {
+                    if self.verbose || *verbose {
+                        println!("Running hooks on files changed between {from} and {to}");
+                    }
+                    run::execute_run_command_with_refs(
+                        &repo_path,
+                        &self.config,
+                        from,
+                        to,
+                        &execution_config,
+                    )
+                    .await?
                 } else {
                     println!("Running hooks on staged files");
+                    run::execute_run_command(&repo_path, &self.config, &execution_config).await?
+                };
+
+                // Report results
+                if execution_result.success {
+                    if self.verbose || *verbose {
+                        println!(
+                            "All hooks passed! Executed {} hooks in {:.2}s",
+                            execution_result.hooks_executed,
+                            execution_result.total_duration.as_secs_f64()
+                        );
+                    }
+                    Ok(0)
+                } else {
+                    if !self.quiet {
+                        eprintln!("Hook execution failed!");
+                        eprintln!(
+                            "Executed: {}, Passed: {}, Failed: {}",
+                            execution_result.hooks_executed,
+                            execution_result.hooks_passed.len(),
+                            execution_result.hooks_failed.len()
+                        );
+
+                        if *verbose || self.verbose {
+                            for failed_hook in &execution_result.hooks_failed {
+                                eprintln!(
+                                    "Failed hook: {} (exit code: {:?})",
+                                    failed_hook.hook_id, failed_hook.exit_code
+                                );
+                                if !failed_hook.stderr.is_empty() {
+                                    eprintln!("  stderr: {}", failed_hook.stderr);
+                                }
+                            }
+                        }
+                    }
+                    Ok(1)
                 }
-                // TODO: Implement run command
-                Ok(0)
             }
             Some(Commands::Install { .. }) => {
                 println!("Installing pre-commit hooks...");
@@ -234,7 +372,23 @@ impl Cli {
             _ => {
                 // Default to run command when no subcommand provided
                 println!("Running hooks (default)...");
-                Ok(0)
+                let repo_path = std::env::current_dir().map_err(|e| {
+                    crate::error::SnpError::Cli(Box::new(crate::error::CliError::RuntimeError {
+                        message: format!("Failed to get current directory: {e}"),
+                    }))
+                })?;
+
+                let execution_config =
+                    ExecutionConfig::new(Stage::PreCommit).with_verbose(self.verbose);
+
+                let execution_result =
+                    run::execute_run_command(&repo_path, &self.config, &execution_config).await?;
+
+                if execution_result.success {
+                    Ok(0)
+                } else {
+                    Ok(1)
+                }
             }
         }
     }

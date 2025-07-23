@@ -1,0 +1,10 @@
+repos:
+  - repo: local
+    hooks:
+      - id: test-hook
+        name: Test Hook
+        entry: echo
+        language: system
+        args: ["Custom config test hook executed"]
+        always_run: true
+        stages: [commit]

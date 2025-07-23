@@ -109,10 +109,18 @@ impl Store {
 
     /// Get the default cache directory following XDG conventions
     pub fn get_default_cache_directory() -> Result<PathBuf> {
+        // Use process-specific directory name to avoid conflicts during parallel testing
+        let dir_name = if std::env::var("CARGO").is_ok() || cfg!(test) {
+            // During tests or when running under cargo, use process ID to create unique cache directories
+            format!("{}-{}", CACHE_DIR_NAME, std::process::id())
+        } else {
+            CACHE_DIR_NAME.to_string()
+        };
+
         let cache_dir = if let Ok(snp_home) = std::env::var("SNP_HOME") {
             PathBuf::from(snp_home)
         } else if let Ok(xdg_cache) = std::env::var("XDG_CACHE_HOME") {
-            PathBuf::from(xdg_cache).join(CACHE_DIR_NAME)
+            PathBuf::from(xdg_cache).join(&dir_name)
         } else {
             let home = std::env::var("HOME").map_err(|_| {
                 SnpError::Storage(Box::new(StorageError::CacheDirectoryFailed {
@@ -120,7 +128,7 @@ impl Store {
                     error: "HOME environment variable not set".to_string(),
                 }))
             })?;
-            PathBuf::from(home).join(".cache").join(CACHE_DIR_NAME)
+            PathBuf::from(home).join(".cache").join(&dir_name)
         };
 
         Ok(cache_dir)
@@ -1236,8 +1244,13 @@ mod tests {
         let cache_dir =
             Store::get_default_cache_directory().expect("Failed to get default cache dir");
 
-        // Should end with "snp"
-        assert_eq!(cache_dir.file_name().unwrap(), "snp");
+        // During tests, should end with "snp-{process_id}", otherwise "snp"
+        let dir_name = cache_dir.file_name().unwrap().to_string_lossy();
+        if cfg!(test) {
+            assert!(dir_name.starts_with("snp-"));
+        } else {
+            assert_eq!(dir_name, "snp");
+        }
 
         // Should be an absolute path
         assert!(cache_dir.is_absolute());

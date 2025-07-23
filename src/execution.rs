@@ -262,23 +262,38 @@ impl HookExecutionEngine {
         let process_result = match self.process_manager.execute_async(process_config).await {
             Ok(result) => result,
             Err(SnpError::Process(process_error)) => {
-                if let crate::error::ProcessError::Timeout {
-                    command: _,
-                    duration,
-                } = process_error.as_ref()
-                {
-                    // Handle timeout as a special case
-                    let timeout_duration = start_time.elapsed().unwrap_or(Duration::new(0, 0));
-                    let error = HookExecutionError::ExecutionTimeout {
-                        hook_id: hook.id.clone(),
-                        timeout: *duration,
-                        partial_output: None,
-                    };
-                    return Ok(result
-                        .failure(-1, timeout_duration, error)
-                        .with_output(String::new(), String::new()));
-                } else {
-                    return Err(SnpError::Process(process_error));
+                let duration = start_time.elapsed().unwrap_or(Duration::new(0, 0));
+                match process_error.as_ref() {
+                    crate::error::ProcessError::Timeout {
+                        command: _,
+                        duration: timeout_duration,
+                    } => {
+                        // Handle timeout as a special case
+                        let error = HookExecutionError::ExecutionTimeout {
+                            hook_id: hook.id.clone(),
+                            timeout: *timeout_duration,
+                            partial_output: None,
+                        };
+                        return Ok(result
+                            .failure(-1, duration, error)
+                            .with_output(String::new(), String::new()));
+                    }
+                    crate::error::ProcessError::SpawnFailed { command, error } => {
+                        // Handle command not found / spawn failures as hook execution failures
+                        let hook_error = HookExecutionError::ExecutionFailed {
+                            hook_id: hook.id.clone(),
+                            exit_code: -1,
+                            stdout: String::new(),
+                            stderr: format!("Failed to execute command '{command}': {error}"),
+                        };
+                        return Ok(result.failure(-1, duration, hook_error).with_output(
+                            String::new(),
+                            format!("Failed to execute command '{command}': {error}"),
+                        ));
+                    }
+                    _ => {
+                        return Err(SnpError::Process(process_error));
+                    }
                 }
             }
             Err(e) => return Err(e),

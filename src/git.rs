@@ -262,8 +262,18 @@ impl GitRepository {
         })
     }
 
+    /// Create a new GitRepository instance (alias for discover_from_path)
+    pub async fn new(path: PathBuf) -> Result<Self> {
+        Self::discover_from_path(path)
+    }
+
     /// Get the root path of the Git repository
     pub fn root_path(&self) -> &Path {
+        &self.root_path
+    }
+
+    /// Get the root path of the Git repository (alias for compatibility)
+    pub fn path(&self) -> &Path {
         &self.root_path
     }
 
@@ -1325,6 +1335,11 @@ impl GitDiff {
             "Diff summary: {} files, +{} -{}",
             self.stats.files_changed, self.stats.insertions, self.stats.deletions
         )
+    }
+
+    /// Check if the diff is empty (no changes)
+    pub fn is_empty(&self) -> bool {
+        self.stats.files_changed == 0 && self.stats.insertions == 0 && self.stats.deletions == 0
     }
 }
 

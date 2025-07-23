@@ -179,8 +179,8 @@ fn test_cli_errors() {
     // Test invalid argument
     let cli_error = CliError::InvalidArgument {
         argument: "--invalid-flag".to_string(),
-        message: "Unknown flag".to_string(),
-        suggestion: Some("Use --help to see available options".to_string()),
+        value: "invalid".to_string(),
+        suggestion: "Use --help to see available options".to_string(),
     };
     let snp_error = SnpError::Cli(Box::new(cli_error));
     assert_eq!(snp_error.exit_code(), 7); // CLI_ERROR
@@ -439,8 +439,8 @@ fn test_exit_codes_match_precommit() {
     // CLI error
     let cli_error = CliError::InvalidArgument {
         argument: "--invalid".to_string(),
-        message: "Invalid".to_string(),
-        suggestion: None,
+        value: "invalid".to_string(),
+        suggestion: "Check the documentation".to_string(),
     };
     let snp_error = SnpError::Cli(Box::new(cli_error));
     assert_eq!(snp_error.exit_code(), CLI_ERROR);

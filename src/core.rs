@@ -292,6 +292,21 @@ impl Hook {
         self
     }
 
+    pub fn with_verbose(mut self, verbose: bool) -> Self {
+        self.verbose = verbose;
+        self
+    }
+
+    pub fn with_exclude_types(mut self, exclude_types: Vec<String>) -> Self {
+        self.exclude_types = exclude_types;
+        self
+    }
+
+    pub fn with_additional_dependencies(mut self, additional_dependencies: Vec<String>) -> Self {
+        self.additional_dependencies = additional_dependencies;
+        self
+    }
+
     /// Validate the hook configuration
     pub fn validate(&self) -> Result<()> {
         if self.id.is_empty() {
@@ -381,6 +396,83 @@ impl Hook {
         let mut cmd = vec![self.entry.clone()];
         cmd.extend(self.args.clone());
         cmd
+    }
+
+    /// Create a Hook from configuration
+    pub fn from_config(
+        config_hook: &crate::config::Hook,
+        _repo_url: &str,
+    ) -> crate::error::Result<Self> {
+        use crate::error::{ConfigError, SnpError};
+
+        // Convert stages from strings to Stage enum
+        let stages = if let Some(stage_strings) = &config_hook.stages {
+            let mut stages = Vec::new();
+            for stage_str in stage_strings {
+                let stage = match stage_str.as_str() {
+                    "pre-commit" | "commit" => Stage::PreCommit,
+                    "pre-push" | "push" => Stage::PrePush,
+                    "pre-merge-commit" => Stage::PreMergeCommit,
+                    "pre-rebase" => Stage::PreRebase,
+                    "post-checkout" => Stage::PostCheckout,
+                    "post-commit" => Stage::PostCommit,
+                    "post-merge" => Stage::PostMerge,
+                    "post-rewrite" => Stage::PostRewrite,
+                    "manual" => Stage::Manual,
+                    _ => {
+                        return Err(SnpError::Config(Box::new(ConfigError::InvalidValue {
+                            message: format!("Invalid stage: {stage_str}"),
+                            field: "stages".to_string(),
+                            value: stage_str.clone(),
+                            expected: "pre-commit, pre-push, pre-merge-commit, pre-rebase, post-checkout, post-commit, post-merge, post-rewrite, manual".to_string(),
+                            file_path: None,
+                            line: None,
+                        })));
+                    }
+                };
+                stages.push(stage);
+            }
+            stages
+        } else {
+            vec![Stage::PreCommit] // Default stage
+        };
+
+        let mut hook = Hook::new(&config_hook.id, &config_hook.entry, &config_hook.language)
+            .with_stages(stages)
+            .always_run(config_hook.always_run.unwrap_or(false))
+            .fail_fast(config_hook.fail_fast.unwrap_or(false))
+            .pass_filenames(config_hook.pass_filenames.unwrap_or(true))
+            .with_verbose(config_hook.verbose.unwrap_or(false));
+
+        if let Some(name) = &config_hook.name {
+            hook = hook.with_name(name);
+        }
+
+        if let Some(files) = &config_hook.files {
+            hook = hook.with_files(files);
+        }
+
+        if let Some(exclude) = &config_hook.exclude {
+            hook = hook.with_exclude(exclude);
+        }
+
+        if let Some(types) = &config_hook.types {
+            hook = hook.with_types(types.clone());
+        }
+
+        if let Some(exclude_types) = &config_hook.exclude_types {
+            hook = hook.with_exclude_types(exclude_types.clone());
+        }
+
+        if let Some(additional_dependencies) = &config_hook.additional_dependencies {
+            hook = hook.with_additional_dependencies(additional_dependencies.clone());
+        }
+
+        if let Some(args) = &config_hook.args {
+            hook = hook.with_args(args.clone());
+        }
+
+        Ok(hook)
     }
 }
 

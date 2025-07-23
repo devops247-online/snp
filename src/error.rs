@@ -97,6 +97,12 @@ pub enum ConfigError {
         message: String,
         path: Option<PathBuf>,
     },
+
+    #[error("Invalid hook ID: {hook_id}")]
+    InvalidHookId {
+        hook_id: String,
+        available_hooks: Vec<String>,
+    },
 }
 
 /// Git operation errors with context
@@ -216,11 +222,11 @@ pub enum HookExecutionError {
 /// CLI argument and command-line interface errors
 #[derive(Debug, Error)]
 pub enum CliError {
-    #[error("Invalid argument: {argument}")]
+    #[error("Invalid argument: {argument} = {value}")]
     InvalidArgument {
         argument: String,
-        message: String,
-        suggestion: Option<String>,
+        value: String,
+        suggestion: String,
     },
 
     #[error("Conflicting arguments: {first} and {second}")]
@@ -238,6 +244,9 @@ pub enum CliError {
         subcommand: String,
         available: Vec<String>,
     },
+
+    #[error("Runtime error: {message}")]
+    RuntimeError { message: String },
 }
 
 /// Storage and database operation errors
@@ -596,10 +605,7 @@ impl ErrorFormatter {
 
     fn add_cli_context(&self, output: &mut String, error: &CliError) {
         match error {
-            CliError::InvalidArgument {
-                suggestion: Some(suggestion),
-                ..
-            } => {
+            CliError::InvalidArgument { suggestion, .. } => {
                 output.push_str(&format!("\n  Help: {suggestion}"));
             }
             CliError::ConflictingArguments { suggestion, .. } => {

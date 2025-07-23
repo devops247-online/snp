@@ -3,6 +3,7 @@
 
 pub mod classification;
 pub mod cli;
+pub mod commands;
 pub mod concurrency;
 pub mod config;
 pub mod core;
