@@ -21,6 +21,9 @@ pub enum SnpError {
 
     #[error("CLI argument error: {0}")]
     Cli(#[from] Box<CliError>),
+
+    #[error("Storage operation failed: {0}")]
+    Storage(#[from] Box<StorageError>),
 }
 
 /// Configuration-related errors with detailed context
@@ -206,6 +209,80 @@ pub enum CliError {
     },
 }
 
+/// Storage and database operation errors
+#[derive(Debug, Error)]
+pub enum StorageError {
+    #[error("Database connection failed: {message}")]
+    ConnectionFailed {
+        message: String,
+        database_path: Option<PathBuf>,
+    },
+
+    #[error("Database initialization failed: {message}")]
+    InitializationFailed {
+        message: String,
+        database_path: PathBuf,
+    },
+
+    #[error("Database query failed: {query}")]
+    QueryFailed {
+        query: String,
+        error: String,
+        database_path: Option<PathBuf>,
+    },
+
+    #[error("Database transaction failed: {operation}")]
+    TransactionFailed { operation: String, error: String },
+
+    #[error("Database schema migration failed: {from_version} -> {to_version}")]
+    MigrationFailed {
+        from_version: u32,
+        to_version: u32,
+        error: String,
+    },
+
+    #[error("Cache directory creation failed: {path}")]
+    CacheDirectoryFailed { path: PathBuf, error: String },
+
+    #[error("Repository not found in cache: {url}@{revision}")]
+    RepositoryNotFound {
+        url: String,
+        revision: String,
+        suggestion: Option<String>,
+    },
+
+    #[error("Environment not found: {language} with dependencies {dependencies:?}")]
+    EnvironmentNotFound {
+        language: String,
+        dependencies: Vec<String>,
+        suggestion: Option<String>,
+    },
+
+    #[error("File locking failed: {path}")]
+    FileLockFailed {
+        path: PathBuf,
+        error: String,
+        timeout_secs: Option<u64>,
+    },
+
+    #[error("Repository cleanup failed: {path}")]
+    CleanupFailed { path: PathBuf, error: String },
+
+    #[error("Database corruption detected: {message}")]
+    DatabaseCorrupted {
+        message: String,
+        database_path: PathBuf,
+        suggestion: Option<String>,
+    },
+
+    #[error("Concurrent access conflict: {operation}")]
+    ConcurrencyConflict {
+        operation: String,
+        error: String,
+        retry_suggested: bool,
+    },
+}
+
 /// Format errors with colors and context
 pub struct ErrorFormatter {
     use_colors: bool,
@@ -233,6 +310,9 @@ impl ErrorFormatter {
             }
             SnpError::Cli(_) => {
                 error!(error_type = "cli", error = %error, "CLI error occurred");
+            }
+            SnpError::Storage(_) => {
+                error!(error_type = "storage", error = %error, "Storage operation failed");
             }
             SnpError::Io(_) => {
                 error!(error_type = "io", error = %error, "IO operation failed");
@@ -265,6 +345,9 @@ impl ErrorFormatter {
             }
             SnpError::Cli(cli_err) => {
                 self.add_cli_context(&mut output, cli_err.as_ref());
+            }
+            SnpError::Storage(storage_err) => {
+                self.add_storage_context(&mut output, storage_err.as_ref());
             }
             _ => {}
         }
@@ -347,6 +430,42 @@ impl ErrorFormatter {
             _ => {}
         }
     }
+
+    fn add_storage_context(&self, output: &mut String, error: &StorageError) {
+        match error {
+            StorageError::DatabaseCorrupted {
+                suggestion: Some(suggestion),
+                ..
+            } => {
+                output.push_str(&format!("\n  Help: {suggestion}"));
+            }
+            StorageError::RepositoryNotFound {
+                suggestion: Some(suggestion),
+                ..
+            } => {
+                output.push_str(&format!("\n  Help: {suggestion}"));
+            }
+            StorageError::EnvironmentNotFound {
+                suggestion: Some(suggestion),
+                ..
+            } => {
+                output.push_str(&format!("\n  Help: {suggestion}"));
+            }
+            StorageError::FileLockFailed {
+                timeout_secs: Some(timeout),
+                ..
+            } => {
+                output.push_str(&format!("\n  Timeout: {timeout} seconds"));
+            }
+            StorageError::ConcurrencyConflict {
+                retry_suggested: true,
+                ..
+            } => {
+                output.push_str("\n  Help: Try running the command again");
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Exit codes matching pre-commit behavior
@@ -359,6 +478,7 @@ pub mod exit_codes {
     pub const PERMISSION_ERROR: i32 = 5;
     pub const TIMEOUT_ERROR: i32 = 6;
     pub const CLI_ERROR: i32 = 7;
+    pub const STORAGE_ERROR: i32 = 8;
 }
 
 impl SnpError {
@@ -377,6 +497,11 @@ impl SnpError {
                 _ => exit_codes::HOOK_FAILURE,
             },
             SnpError::Cli(_) => exit_codes::CLI_ERROR,
+            SnpError::Storage(storage_err) => match storage_err.as_ref() {
+                StorageError::FileLockFailed { .. } => exit_codes::TIMEOUT_ERROR,
+                StorageError::CacheDirectoryFailed { .. } => exit_codes::PERMISSION_ERROR,
+                _ => exit_codes::STORAGE_ERROR,
+            },
             _ => exit_codes::GENERAL_ERROR,
         }
     }
@@ -418,6 +543,37 @@ impl From<git2::Error> for Box<GitError> {
 impl From<git2::Error> for SnpError {
     fn from(error: git2::Error) -> Self {
         SnpError::Git(Box::<GitError>::from(error))
+    }
+}
+
+// Conversion from rusqlite::Error to StorageError
+impl From<rusqlite::Error> for Box<StorageError> {
+    fn from(error: rusqlite::Error) -> Self {
+        match error {
+            rusqlite::Error::SqliteFailure(sqlite_error, message) => {
+                Box::new(StorageError::QueryFailed {
+                    query: "SQLite operation".to_string(),
+                    error: message.unwrap_or_else(|| format!("SQLite error: {sqlite_error:?}")),
+                    database_path: None,
+                })
+            }
+            rusqlite::Error::InvalidPath(path) => Box::new(StorageError::ConnectionFailed {
+                message: format!("Invalid database path: {}", path.display()),
+                database_path: Some(path),
+            }),
+            _ => Box::new(StorageError::QueryFailed {
+                query: "Database operation".to_string(),
+                error: error.to_string(),
+                database_path: None,
+            }),
+        }
+    }
+}
+
+// Direct conversion from rusqlite::Error to SnpError
+impl From<rusqlite::Error> for SnpError {
+    fn from(error: rusqlite::Error) -> Self {
+        SnpError::Storage(Box::<StorageError>::from(error))
     }
 }
 

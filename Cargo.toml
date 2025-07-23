@@ -48,6 +48,12 @@ which = "5.0"
 # Terminal detection
 is-terminal = "0.4"
 
+# Database storage
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# File locking
+fs2 = "0.4"
+
 [dev-dependencies]
 # Testing utilities
 assert_cmd = "2.0"
