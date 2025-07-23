@@ -130,8 +130,10 @@ async fn test_git_repository_version_discovery() {
     // Direct Git operations are not implemented yet, should return error
     assert!(result.is_err());
     let error = result.unwrap_err();
-    assert!(error.to_string().contains("git operations") || 
-            error.to_string().contains("Invalid repository URL"));
+    assert!(
+        error.to_string().contains("git operations")
+            || error.to_string().contains("Invalid repository URL")
+    );
 }
 
 #[tokio::test]
@@ -166,16 +168,11 @@ async fn test_update_strategy_application() {
 
     let mut resolver = RepositoryVersionResolver::new();
     let repo_url = "https://github.com/psf/black"; // Use real repo that exists
-    let strategies = vec![
-        UpdateStrategy::LatestTag,
-        UpdateStrategy::LatestCommit,
-    ];
+    let strategies = vec![UpdateStrategy::LatestTag, UpdateStrategy::LatestCommit];
 
     for strategy in strategies {
-        let result = resolver
-            .get_latest_version(repo_url, strategy)
-            .await;
-        
+        let result = resolver.get_latest_version(repo_url, strategy).await;
+
         // API calls may succeed or fail depending on network/rate limits
         match result {
             Ok(version) => {
@@ -678,10 +675,12 @@ async fn test_network_failure_handling() {
     // Real implementation should return error for invalid URLs
     assert!(result.is_err());
     let error = result.unwrap_err();
-    assert!(error.to_string().contains("HTTP request failed") || 
-            error.to_string().contains("Invalid repository URL") ||
-            error.to_string().contains("GitHub API returned status") ||
-            error.to_string().contains("git operations"));
+    assert!(
+        error.to_string().contains("HTTP request failed")
+            || error.to_string().contains("Invalid repository URL")
+            || error.to_string().contains("GitHub API returned status")
+            || error.to_string().contains("git operations")
+    );
 }
 
 #[tokio::test]
@@ -718,7 +717,10 @@ async fn test_invalid_repository_urls() {
         .await;
     assert!(result.is_err());
     let error = result.unwrap_err();
-    assert!(error.to_string().contains("Invalid repository URL") || error.to_string().contains("Failed to parse URL"));
+    assert!(
+        error.to_string().contains("Invalid repository URL")
+            || error.to_string().contains("Failed to parse URL")
+    );
 }
 
 #[tokio::test]
