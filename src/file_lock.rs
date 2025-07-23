@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime};
 
-// Re-export file locking dependencies
-pub use file_lock::FileLock as ExternalFileLock;
+// File locking dependencies
+use fs2::FileExt;
 
 /// Lock types and modes
 #[derive(Debug, Clone, PartialEq)]
@@ -405,8 +405,6 @@ impl FileLockManager {
         lock_path: &Path,
         config: &LockConfig,
     ) -> Result<Box<dyn std::any::Any + Send>> {
-        use fs2::FileExt;
-
         let file = fs::OpenOptions::new()
             .create(true)
             .truncate(true)
@@ -434,7 +432,7 @@ impl FileLockManager {
             }
             LockType::Shared => {
                 // For tests, we'll be more permissive with shared locks
-                match fs2::FileExt::try_lock_shared(&file) {
+                match FileExt::try_lock_shared(&file) {
                     Ok(_) => {} // Success
                     Err(_) => {
                         // For testing purposes, allow shared locks even if exclusive lock fails
@@ -753,14 +751,18 @@ pub struct WindowsFileLocking {
 impl WindowsFileLocking {
     pub fn acquire_lock_file(
         &self,
-        handle: winapi::um::winnt::HANDLE,
-        exclusive: bool,
+        _handle: winapi::um::winnt::HANDLE,
+        _exclusive: bool,
     ) -> Result<()> {
         // Windows-specific locking implementation would go here
         Ok(())
     }
 
-    pub fn create_file_mapping(&self, path: &Path, size: u64) -> Result<winapi::um::winnt::HANDLE> {
+    pub fn create_file_mapping(
+        &self,
+        _path: &Path,
+        _size: u64,
+    ) -> Result<winapi::um::winnt::HANDLE> {
         // File mapping implementation would go here
         Ok(std::ptr::null_mut())
     }

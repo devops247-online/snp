@@ -59,7 +59,6 @@ is-terminal = "0.4"
 
 # File locking and monitoring
 fs2 = "0.4"
-file-lock = "2.1"
 notify = "6.1"
 
 # Database storage
