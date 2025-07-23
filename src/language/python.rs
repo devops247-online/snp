@@ -439,6 +439,11 @@ impl PythonLanguagePlugin {
         let temp_dir = std::env::temp_dir();
         let env_path = temp_dir.join("snp-python-envs").join(env_id);
 
+        // If environment already exists, return it (handles race conditions)
+        if env_path.exists() && self.validate_environment(&env_path).await.unwrap_or(false) {
+            return Ok(env_path);
+        }
+
         // Create parent directory
         fs::create_dir_all(env_path.parent().unwrap()).await?;
 
@@ -587,13 +592,22 @@ impl PythonLanguagePlugin {
     /// Validate existing virtual environment
     async fn validate_environment(&self, env_path: &Path) -> Result<bool> {
         // Check if Python executable exists
-        let python_exe = self.get_python_executable(env_path)?;
+        let python_exe = match self.get_python_executable(env_path) {
+            Ok(exe) => exe,
+            Err(_) => return Ok(false),
+        };
+
         if !python_exe.exists() {
             return Ok(false);
         }
 
-        // Check if pip executable exists
-        let pip_exe = self.get_pip_executable(env_path)?;
+        // Check if pip executable exists (don't fail if it doesn't, we can install it)
+        let pip_exe = if cfg!(windows) {
+            env_path.join("Scripts").join("pip.exe")
+        } else {
+            env_path.join("bin").join("pip")
+        };
+
         if !pip_exe.exists() {
             return Ok(false);
         }
@@ -624,25 +638,6 @@ impl PythonLanguagePlugin {
                 language: "python".to_string(),
                 error: format!("Python executable not found at {}", python_exe.display()),
                 recovery_suggestion: Some("Recreate virtual environment".to_string()),
-            }))
-        }
-    }
-
-    /// Get pip executable path from virtual environment
-    fn get_pip_executable(&self, env_path: &Path) -> Result<PathBuf> {
-        let pip_exe = if cfg!(windows) {
-            env_path.join("Scripts").join("pip.exe")
-        } else {
-            env_path.join("bin").join("pip")
-        };
-
-        if pip_exe.exists() {
-            Ok(pip_exe)
-        } else {
-            Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
-                language: "python".to_string(),
-                error: format!("pip executable not found at {}", pip_exe.display()),
-                recovery_suggestion: Some("Reinstall pip in virtual environment".to_string()),
             }))
         }
     }
@@ -807,7 +802,19 @@ impl PythonDependencyManager {
         env_path: &Path,
         dependencies: &[Dependency],
     ) -> Result<InstallationResult> {
-        let pip_executable = self.get_pip_executable(env_path)?;
+        let pip_executable = if cfg!(windows) {
+            env_path.join("Scripts").join("pip.exe")
+        } else {
+            env_path.join("bin").join("pip")
+        };
+
+        if !pip_executable.exists() {
+            return Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
+                language: "python".to_string(),
+                error: format!("pip executable not found at {}", pip_executable.display()),
+                recovery_suggestion: Some("Reinstall pip in virtual environment".to_string()),
+            }));
+        }
         let mut installed = Vec::new();
         let mut failed = Vec::new();
         let start_time = Instant::now();
@@ -910,25 +917,6 @@ impl PythonDependencyManager {
     fn extract_installed_version(&self, _stdout: &[u8]) -> Result<String> {
         // This is a simplified version extraction - can be enhanced
         Ok("unknown".to_string())
-    }
-
-    /// Get pip executable from environment
-    fn get_pip_executable(&self, env_path: &Path) -> Result<PathBuf> {
-        let pip_exe = if cfg!(windows) {
-            env_path.join("Scripts").join("pip.exe")
-        } else {
-            env_path.join("bin").join("pip")
-        };
-
-        if pip_exe.exists() {
-            Ok(pip_exe)
-        } else {
-            Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
-                language: "python".to_string(),
-                error: format!("pip executable not found at {}", pip_exe.display()),
-                recovery_suggestion: Some("Reinstall pip in virtual environment".to_string()),
-            }))
-        }
     }
 }
 
