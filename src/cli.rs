@@ -171,9 +171,13 @@ impl Cli {
 
         // Validate conflicting flags
         if self.verbose && self.quiet {
-            return Err(crate::error::SnpError::Cli(
-                "Cannot specify both --verbose and --quiet flags".to_string(),
-            ));
+            return Err(crate::error::SnpError::Cli(Box::new(
+                crate::error::CliError::ConflictingArguments {
+                    first: "--verbose".to_string(),
+                    second: "--quiet".to_string(),
+                    suggestion: "Use either --verbose for more output or --quiet for less output, but not both".to_string(),
+                },
+            )));
         }
 
         match &self.command {
@@ -185,9 +189,13 @@ impl Cli {
             }) => {
                 // Validate run command arguments
                 if *all_files && !files.is_empty() {
-                    return Err(crate::error::SnpError::Cli(
-                        "Cannot specify both --all-files and --files options".to_string(),
-                    ));
+                    return Err(crate::error::SnpError::Cli(Box::new(
+                        crate::error::CliError::ConflictingArguments {
+                            first: "--all-files".to_string(),
+                            second: "--files".to_string(),
+                            suggestion: "Use either --all-files to run on all files or --files to specify particular files".to_string(),
+                        },
+                    )));
                 }
 
                 if let Some(hook_id) = hook {

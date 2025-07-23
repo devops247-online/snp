@@ -1,27 +1,377 @@
-// Error handling for SNP
+// Comprehensive error handling framework for SNP
+use std::path::PathBuf;
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, SnpError>;
 
+/// Main error type for SNP with comprehensive error hierarchy
 #[derive(Debug, Error)]
 pub enum SnpError {
     #[error("Configuration error: {0}")]
-    Config(String),
+    Config(#[from] Box<ConfigError>),
 
     #[error("Git operation failed: {0}")]
-    Git(String),
+    Git(#[from] Box<GitError>),
 
     #[error("Hook execution failed: {0}")]
-    HookExecution(String),
+    HookExecution(#[from] Box<HookExecutionError>),
 
     #[error("IO operation failed: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("YAML parsing error: {0}")]
-    Yaml(#[from] serde_yaml::Error),
-
     #[error("CLI argument error: {0}")]
-    Cli(String),
+    Cli(#[from] Box<CliError>),
+}
+
+/// Configuration-related errors with detailed context
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("Invalid YAML syntax: {message}")]
+    InvalidYaml {
+        message: String,
+        line: Option<u32>,
+        column: Option<u32>,
+        file_path: Option<PathBuf>,
+    },
+
+    #[error("Missing required field: {field}")]
+    MissingField {
+        field: String,
+        file_path: Option<PathBuf>,
+        line: Option<u32>,
+    },
+
+    #[error("Configuration file not found: {path}")]
+    NotFound {
+        path: PathBuf,
+        suggestion: Option<String>,
+    },
+
+    #[error("Invalid configuration value: {message}")]
+    InvalidValue {
+        message: String,
+        field: String,
+        value: String,
+        expected: String,
+        file_path: Option<PathBuf>,
+        line: Option<u32>,
+    },
+
+    #[error("Configuration validation failed: {message}")]
+    ValidationFailed {
+        message: String,
+        file_path: Option<PathBuf>,
+        errors: Vec<String>,
+    },
+
+    #[error("Invalid regex pattern: {pattern}")]
+    InvalidRegex {
+        pattern: String,
+        field: String,
+        error: String,
+        file_path: Option<PathBuf>,
+        line: Option<u32>,
+    },
+}
+
+/// Git operation errors with context
+#[derive(Debug, Error)]
+pub enum GitError {
+    #[error("Repository not found: {path}")]
+    RepositoryNotFound {
+        path: PathBuf,
+        suggestion: Option<String>,
+    },
+
+    #[error("Git command failed: {command}")]
+    CommandFailed {
+        command: String,
+        exit_code: Option<i32>,
+        stdout: String,
+        stderr: String,
+        working_dir: Option<PathBuf>,
+    },
+
+    #[error("Permission denied for git operation: {operation}")]
+    PermissionDenied {
+        operation: String,
+        path: PathBuf,
+        suggestion: Option<String>,
+    },
+
+    #[error("Invalid git reference: {reference}")]
+    InvalidReference {
+        reference: String,
+        repository: String,
+        suggestion: Option<String>,
+    },
+
+    #[error("Git operation timeout: {operation}")]
+    Timeout {
+        operation: String,
+        duration_secs: u64,
+    },
+
+    #[error("Remote repository error: {message}")]
+    RemoteError {
+        message: String,
+        repository: String,
+        operation: String,
+    },
+}
+
+/// Hook execution errors with detailed context
+#[derive(Debug, Error)]
+pub enum HookExecutionError {
+    #[error("Command not found: {command}")]
+    CommandNotFound {
+        command: String,
+        hook_id: String,
+        language: String,
+        suggestion: Option<String>,
+    },
+
+    #[error("Hook execution timeout: {hook_id}")]
+    ExecutionTimeout {
+        hook_id: String,
+        command: String,
+        timeout_secs: u64,
+    },
+
+    #[error("Permission denied executing hook: {hook_id}")]
+    PermissionDenied {
+        hook_id: String,
+        command: String,
+        path: PathBuf,
+        suggestion: Option<String>,
+    },
+
+    #[error("Hook failed with exit code {exit_code}: {hook_id}")]
+    NonZeroExit {
+        hook_id: String,
+        command: String,
+        exit_code: i32,
+        stdout: String,
+        stderr: String,
+        files_processed: Vec<PathBuf>,
+    },
+
+    #[error("Environment setup failed for {language}: {message}")]
+    EnvironmentSetupFailed {
+        language: String,
+        hook_id: String,
+        message: String,
+        suggestion: Option<String>,
+    },
+
+    #[error("Dependency installation failed: {dependency}")]
+    DependencyInstallFailed {
+        dependency: String,
+        hook_id: String,
+        language: String,
+        error: String,
+    },
+}
+
+/// CLI argument and command-line interface errors
+#[derive(Debug, Error)]
+pub enum CliError {
+    #[error("Invalid argument: {argument}")]
+    InvalidArgument {
+        argument: String,
+        message: String,
+        suggestion: Option<String>,
+    },
+
+    #[error("Conflicting arguments: {first} and {second}")]
+    ConflictingArguments {
+        first: String,
+        second: String,
+        suggestion: String,
+    },
+
+    #[error("Missing required argument: {argument}")]
+    MissingArgument { argument: String, context: String },
+
+    #[error("Invalid subcommand: {subcommand}")]
+    InvalidSubcommand {
+        subcommand: String,
+        available: Vec<String>,
+    },
+}
+
+/// Format errors with colors and context
+pub struct ErrorFormatter {
+    use_colors: bool,
+}
+
+impl ErrorFormatter {
+    pub fn new(use_colors: bool) -> Self {
+        Self { use_colors }
+    }
+
+    /// Format an error with context and colors
+    pub fn format_error(&self, error: &SnpError) -> String {
+        let mut output = String::new();
+
+        if self.use_colors {
+            output.push_str("\x1b[31m"); // Red color
+        }
+        output.push_str("Error: ");
+
+        if self.use_colors {
+            output.push_str("\x1b[0m"); // Reset color
+        }
+
+        output.push_str(&error.to_string());
+
+        // Add context information
+        match error {
+            SnpError::Config(config_err) => {
+                self.add_config_context(&mut output, config_err.as_ref());
+            }
+            SnpError::Git(git_err) => {
+                self.add_git_context(&mut output, git_err.as_ref());
+            }
+            SnpError::HookExecution(hook_err) => {
+                self.add_hook_context(&mut output, hook_err.as_ref());
+            }
+            SnpError::Cli(cli_err) => {
+                self.add_cli_context(&mut output, cli_err.as_ref());
+            }
+            _ => {}
+        }
+
+        output
+    }
+
+    fn add_config_context(&self, output: &mut String, error: &ConfigError) {
+        match error {
+            ConfigError::InvalidYaml {
+                file_path: Some(path),
+                line: Some(line),
+                ..
+            } => {
+                output.push_str(&format!("\n  --> {}:{}", path.display(), line));
+            }
+            ConfigError::NotFound {
+                suggestion: Some(suggestion),
+                ..
+            } => {
+                output.push_str(&format!("\n  Help: {suggestion}"));
+            }
+            _ => {}
+        }
+    }
+
+    fn add_git_context(&self, output: &mut String, error: &GitError) {
+        match error {
+            GitError::CommandFailed { stderr, .. } if !stderr.is_empty() => {
+                output.push_str(&format!("\n  Git error: {stderr}"));
+            }
+            GitError::PermissionDenied {
+                suggestion: Some(suggestion),
+                ..
+            } => {
+                output.push_str(&format!("\n  Help: {suggestion}"));
+            }
+            GitError::RepositoryNotFound {
+                suggestion: Some(suggestion),
+                ..
+            } => {
+                output.push_str(&format!("\n  Help: {suggestion}"));
+            }
+            GitError::InvalidReference {
+                suggestion: Some(suggestion),
+                ..
+            } => {
+                output.push_str(&format!("\n  Help: {suggestion}"));
+            }
+            _ => {}
+        }
+    }
+
+    fn add_hook_context(&self, output: &mut String, error: &HookExecutionError) {
+        match error {
+            HookExecutionError::CommandNotFound {
+                suggestion: Some(suggestion),
+                ..
+            } => {
+                output.push_str(&format!("\n  Help: {suggestion}"));
+            }
+            HookExecutionError::NonZeroExit { stderr, .. } if !stderr.is_empty() => {
+                output.push_str(&format!("\n  Hook output: {stderr}"));
+            }
+            _ => {}
+        }
+    }
+
+    fn add_cli_context(&self, output: &mut String, error: &CliError) {
+        match error {
+            CliError::InvalidArgument {
+                suggestion: Some(suggestion),
+                ..
+            } => {
+                output.push_str(&format!("\n  Help: {suggestion}"));
+            }
+            CliError::ConflictingArguments { suggestion, .. } => {
+                output.push_str(&format!("\n  Help: {suggestion}"));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Exit codes matching pre-commit behavior
+pub mod exit_codes {
+    pub const SUCCESS: i32 = 0;
+    pub const GENERAL_ERROR: i32 = 1;
+    pub const CONFIG_ERROR: i32 = 2;
+    pub const GIT_ERROR: i32 = 3;
+    pub const HOOK_FAILURE: i32 = 4;
+    pub const PERMISSION_ERROR: i32 = 5;
+    pub const TIMEOUT_ERROR: i32 = 6;
+    pub const CLI_ERROR: i32 = 7;
+}
+
+impl SnpError {
+    /// Get the appropriate exit code for this error
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            SnpError::Config(_) => exit_codes::CONFIG_ERROR,
+            SnpError::Git(git_err) => match git_err.as_ref() {
+                GitError::PermissionDenied { .. } => exit_codes::PERMISSION_ERROR,
+                GitError::Timeout { .. } => exit_codes::TIMEOUT_ERROR,
+                _ => exit_codes::GIT_ERROR,
+            },
+            SnpError::HookExecution(hook_err) => match hook_err.as_ref() {
+                HookExecutionError::PermissionDenied { .. } => exit_codes::PERMISSION_ERROR,
+                HookExecutionError::ExecutionTimeout { .. } => exit_codes::TIMEOUT_ERROR,
+                _ => exit_codes::HOOK_FAILURE,
+            },
+            SnpError::Cli(_) => exit_codes::CLI_ERROR,
+            _ => exit_codes::GENERAL_ERROR,
+        }
+    }
+
+    /// Create a user-friendly error message with context
+    pub fn user_message(&self, use_colors: bool) -> String {
+        let formatter = ErrorFormatter::new(use_colors);
+        formatter.format_error(self)
+    }
+}
+
+// Conversion from serde_yaml::Error to ConfigError
+impl From<serde_yaml::Error> for Box<ConfigError> {
+    fn from(error: serde_yaml::Error) -> Self {
+        let location = error.location();
+        Box::new(ConfigError::InvalidYaml {
+            message: error.to_string(),
+            line: location.as_ref().map(|l| l.line() as u32),
+            column: location.as_ref().map(|l| l.column() as u32),
+            file_path: None,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -30,8 +380,15 @@ mod tests {
 
     #[test]
     fn test_error_display() {
-        let error = SnpError::Config("test error".to_string());
-        assert_eq!(error.to_string(), "Configuration error: test error");
+        let error = SnpError::Config(Box::new(ConfigError::ValidationFailed {
+            message: "test error".to_string(),
+            file_path: None,
+            errors: vec![],
+        }));
+        assert_eq!(
+            error.to_string(),
+            "Configuration error: Configuration validation failed: test error"
+        );
     }
 
     #[test]

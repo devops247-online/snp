@@ -1,0 +1,25 @@
+# Clippy configuration for SNP project
+
+# Threshold for boxing large error variants (bytes)
+large-error-threshold = 128
+
+# Threshold for large enum variants (bytes)
+enum-variant-size-threshold = 128
+
+# Complexity thresholds
+cognitive-complexity-threshold = 25
+too-many-arguments-threshold = 7
+type-complexity-threshold = 250
+
+# Size thresholds
+too-large-for-stack = 512
+pass-by-value-size-limit = 256
+
+# Enable additional lints for better code quality
+avoid-breaking-exported-api = false
+
+# Allow certain patterns common in error handling
+missing-docs-in-crate-items = false
+
+# Performance considerations
+trivial-copy-size-limit = 128

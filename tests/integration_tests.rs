@@ -122,7 +122,7 @@ fn test_conflicting_verbose_quiet_flags() {
     cmd.args(["--verbose", "--quiet", "run"]);
 
     cmd.assert().failure().stderr(predicate::str::contains(
-        "Cannot specify both --verbose and --quiet",
+        "Conflicting arguments: --verbose and --quiet",
     ));
 }
 
@@ -133,7 +133,7 @@ fn test_conflicting_run_options() {
     cmd.args(["run", "--all-files", "--files", "test.py"]);
 
     cmd.assert().failure().stderr(predicate::str::contains(
-        "Cannot specify both --all-files and --files",
+        "Conflicting arguments: --all-files and --files",
     ));
 }
 

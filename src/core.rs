@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::error::{Result, SnpError};
+use crate::error::{ConfigError, Result, SnpError};
 
 /// Represents the different stages where hooks can be executed
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -42,7 +42,14 @@ impl Stage {
             // Legacy aliases
             "commit" => Ok(Stage::PreCommit),
             "push" => Ok(Stage::PrePush),
-            _ => Err(SnpError::Config(format!("Unknown stage: {s}"))),
+            _ => Err(SnpError::Config(Box::new(ConfigError::InvalidValue {
+                message: format!("Unknown stage: {s}"),
+                field: "stage".to_string(),
+                value: s.to_string(),
+                expected: "valid git hook stage (pre-commit, pre-push, etc.)".to_string(),
+                file_path: None,
+                line: None,
+            }))),
         }
     }
 
@@ -140,21 +147,30 @@ impl Repository {
         match self {
             Repository::Remote { url, .. } => {
                 if url.is_empty() {
-                    return Err(SnpError::Config(
-                        "Remote repository URL cannot be empty".to_string(),
-                    ));
+                    return Err(SnpError::Config(Box::new(ConfigError::MissingField {
+                        field: "repo".to_string(),
+                        file_path: None,
+                        line: None,
+                    })));
                 }
                 // Basic URL validation
                 if !url.contains("://") && !url.contains('@') {
-                    return Err(SnpError::Config(format!("Invalid repository URL: {url}")));
+                    return Err(SnpError::Config(Box::new(ConfigError::InvalidValue {
+                        message: "Invalid repository URL format".to_string(),
+                        field: "repo".to_string(),
+                        value: url.clone(),
+                        expected: "valid URL (http://, https://, git@, etc.)".to_string(),
+                        file_path: None,
+                        line: None,
+                    })));
                 }
             }
             Repository::Local { path } => {
                 if !path.exists() {
-                    return Err(SnpError::Config(format!(
-                        "Local repository path does not exist: {}",
-                        path.display()
-                    )));
+                    return Err(SnpError::Config(Box::new(ConfigError::NotFound {
+                        path: path.clone(),
+                        suggestion: Some("Ensure the local repository path exists".to_string()),
+                    })));
                 }
             }
             Repository::Meta => {
@@ -187,19 +203,29 @@ impl FileFilter {
 
     /// Set the files pattern
     pub fn with_files_pattern(mut self, pattern: &str) -> Result<Self> {
-        self.files_pattern =
-            Some(Regex::new(pattern).map_err(|e| {
-                SnpError::Config(format!("Invalid files pattern '{pattern}': {e}"))
-            })?);
+        self.files_pattern = Some(Regex::new(pattern).map_err(|e| {
+            SnpError::Config(Box::new(ConfigError::InvalidRegex {
+                pattern: pattern.to_string(),
+                field: "files".to_string(),
+                error: e.to_string(),
+                file_path: None,
+                line: None,
+            }))
+        })?);
         Ok(self)
     }
 
     /// Set the exclude pattern
     pub fn with_exclude_pattern(mut self, pattern: &str) -> Result<Self> {
-        self.exclude_pattern =
-            Some(Regex::new(pattern).map_err(|e| {
-                SnpError::Config(format!("Invalid exclude pattern '{pattern}': {e}"))
-            })?);
+        self.exclude_pattern = Some(Regex::new(pattern).map_err(|e| {
+            SnpError::Config(Box::new(ConfigError::InvalidRegex {
+                pattern: pattern.to_string(),
+                field: "exclude".to_string(),
+                error: e.to_string(),
+                file_path: None,
+                line: None,
+            }))
+        })?);
         Ok(self)
     }
 
@@ -356,37 +382,55 @@ impl Hook {
     /// Validate the hook configuration
     pub fn validate(&self) -> Result<()> {
         if self.id.is_empty() {
-            return Err(SnpError::Config("Hook ID cannot be empty".to_string()));
+            return Err(SnpError::Config(Box::new(ConfigError::MissingField {
+                field: "id".to_string(),
+                file_path: None,
+                line: None,
+            })));
         }
 
         if self.entry.is_empty() {
-            return Err(SnpError::Config(format!(
-                "Hook '{}' has empty entry",
-                self.id
-            )));
+            return Err(SnpError::Config(Box::new(ConfigError::MissingField {
+                field: "entry".to_string(),
+                file_path: None,
+                line: None,
+            })));
         }
 
         // Validate file patterns
         if let Some(ref files) = self.files {
             Regex::new(files).map_err(|e| {
-                SnpError::Config(format!("Hook '{}' has invalid files pattern: {e}", self.id))
+                SnpError::Config(Box::new(ConfigError::InvalidRegex {
+                    pattern: files.clone(),
+                    field: "files".to_string(),
+                    error: e.to_string(),
+                    file_path: None,
+                    line: None,
+                }))
             })?;
         }
 
         if let Some(ref exclude) = self.exclude {
             Regex::new(exclude).map_err(|e| {
-                SnpError::Config(format!(
-                    "Hook '{}' has invalid exclude pattern: {e}",
-                    self.id
-                ))
+                SnpError::Config(Box::new(ConfigError::InvalidRegex {
+                    pattern: exclude.clone(),
+                    field: "exclude".to_string(),
+                    error: e.to_string(),
+                    file_path: None,
+                    line: None,
+                }))
             })?;
         }
 
         if self.stages.is_empty() {
-            return Err(SnpError::Config(format!(
-                "Hook '{}' must have at least one stage",
-                self.id
-            )));
+            return Err(SnpError::Config(Box::new(ConfigError::ValidationFailed {
+                message: format!("Hook '{}' must have at least one stage", self.id),
+                file_path: None,
+                errors: vec![
+                    "Each hook must specify at least one stage (e.g., pre-commit, pre-push)"
+                        .to_string(),
+                ],
+            })));
         }
 
         Ok(())

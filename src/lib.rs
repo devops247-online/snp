@@ -7,8 +7,11 @@ pub mod core;
 pub mod error;
 
 // Re-export main types for easier access
+pub use config::Config;
 pub use core::{ExecutionContext, FileFilter, Hook, Repository, Stage};
-pub use error::{Result, SnpError};
+pub use error::{
+    exit_codes, CliError, ConfigError, GitError, HookExecutionError, Result, SnpError,
+};
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
