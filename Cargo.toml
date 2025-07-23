@@ -102,6 +102,7 @@ is-terminal = "0.4"
 # File locking and monitoring
 fs2 = "0.4"
 notify = "6.1"
+filetime = "0.2"
 
 # Database storage
 rusqlite = { version = "0.31", features = ["bundled"] }

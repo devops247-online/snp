@@ -13,6 +13,7 @@ pub mod file_lock;
 pub mod filesystem;
 pub mod git;
 pub mod hook_chaining;
+pub mod install;
 pub mod language;
 pub mod logging;
 pub mod migration;
@@ -49,6 +50,10 @@ pub use hook_chaining::{
     CustomConditionEvaluator, DependencyGraph, DependencyResolver, ExecutionCondition,
     ExecutionPlan, ExecutionStrategy, FailureBehavior, FailureStrategy, HookChain,
     HookChainExecutor, InterHookCommunication,
+};
+pub use install::{
+    BackupInfo, CleanupResult, GitHookManager, HookBackupManager, HookConfig, HookTemplateGenerator,
+    HookType, InstallConfig, InstallResult, RestoreInfo, UninstallConfig, UninstallResult,
 };
 pub use language::{
     BaseLanguagePlugin, CommandBuilder, Dependency, DependencyConflict, DependencyManager,

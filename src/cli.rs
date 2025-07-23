@@ -352,14 +352,114 @@ impl Cli {
                     Ok(1)
                 }
             }
-            Some(Commands::Install { .. }) => {
-                println!("Installing pre-commit hooks...");
-                // TODO: Implement install command
+            Some(Commands::Install {
+                hook_type,
+                overwrite,
+                install_hooks,
+                allow_missing_config,
+            }) => {
+                use crate::install::{GitHookManager, InstallConfig};
+
+                // Get current directory as repository path
+                let repo_path = std::env::current_dir().map_err(|e| {
+                    crate::error::SnpError::Cli(Box::new(crate::error::CliError::RuntimeError {
+                        message: format!("Failed to get current directory: {e}"),
+                    }))
+                })?;
+
+                // Discover git repository
+                let git_repo = crate::git::GitRepository::discover_from_path(&repo_path)?;
+                let hook_manager = GitHookManager::new(git_repo);
+
+                // Create install configuration
+                let install_config = InstallConfig {
+                    hook_types: if hook_type.is_empty() {
+                        vec!["pre-commit".to_string()]
+                    } else {
+                        hook_type.clone()
+                    },
+                    overwrite_existing: *overwrite,
+                    allow_missing_config: *allow_missing_config,
+                    backup_existing: !overwrite,
+                    hook_args: Vec::new(),
+                };
+
+                // Install hooks
+                let result = hook_manager.install_hooks(&install_config).await?;
+
+                // Report results
+                if !self.quiet {
+                    for hook in &result.hooks_installed {
+                        println!("✓ Installed {hook} hook");
+                    }
+                    for hook in &result.hooks_backed_up {
+                        println!("📦 Backed up existing {hook} hook");
+                    }
+                    for hook in &result.hooks_overwritten {
+                        println!("⚠️  Overwritten {hook} hook");
+                    }
+                    for warning in &result.warnings {
+                        eprintln!("⚠️  {warning}");
+                    }
+                }
+
+                // Install hook environments if requested
+                if *install_hooks {
+                    println!("Installing hook environments...");
+                    // TODO: Implement hook environment installation
+                }
+
                 Ok(0)
             }
             Some(Commands::Clean) => {
                 println!("Cleaning pre-commit files...");
                 // TODO: Implement clean command
+                Ok(0)
+            }
+            Some(Commands::Uninstall { hook_type }) => {
+                use crate::install::{GitHookManager, UninstallConfig};
+
+                // Get current directory as repository path
+                let repo_path = std::env::current_dir().map_err(|e| {
+                    crate::error::SnpError::Cli(Box::new(crate::error::CliError::RuntimeError {
+                        message: format!("Failed to get current directory: {e}"),
+                    }))
+                })?;
+
+                // Discover git repository
+                let git_repo = crate::git::GitRepository::discover_from_path(&repo_path)?;
+                let hook_manager = GitHookManager::new(git_repo);
+
+                // Create uninstall configuration
+                let uninstall_config = UninstallConfig {
+                    hook_types: hook_type.clone(),
+                    restore_backups: true,
+                    clean_backups: false,
+                };
+
+                // Uninstall hooks
+                let result = hook_manager.uninstall_hooks(&uninstall_config).await?;
+
+                // Report results
+                if !self.quiet {
+                    for hook in &result.hooks_removed {
+                        println!("✓ Removed {hook} hook");
+                    }
+                    for hook in &result.hooks_restored {
+                        println!("🔄 Restored backup for {hook} hook");
+                    }
+                    for cleaned in &result.backups_cleaned {
+                        println!("🧹 Cleaned backup: {cleaned}");
+                    }
+                    for warning in &result.warnings {
+                        eprintln!("⚠️  {warning}");
+                    }
+
+                    if result.hooks_removed.is_empty() && result.warnings.is_empty() {
+                        println!("No SNP hooks found to uninstall");
+                    }
+                }
+
                 Ok(0)
             }
             Some(Commands::GenerateCompletion { shell }) => {
