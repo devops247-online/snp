@@ -46,6 +46,13 @@ tempfile = "3.8"
 which = "5.0"
 futures = "0.3"
 
+# Concurrency and performance
+crossbeam = "0.8"
+rayon = "1.7"
+
+# System monitoring
+sysinfo = "0.30"
+
 # Terminal detection
 is-terminal = "0.4"
 rusqlite = { version = "0.31", features = ["bundled"] }

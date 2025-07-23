@@ -2,6 +2,7 @@
 // This file contains the core library functionality
 
 pub mod cli;
+pub mod concurrency;
 pub mod config;
 pub mod core;
 pub mod error;
@@ -12,6 +13,10 @@ pub mod process;
 pub mod storage;
 
 // Re-export main types for easier access
+pub use concurrency::{
+    BatchResult, ConcurrencyExecutor, ErrorAggregator, ResourceGuard, ResourceLimits,
+    ResourceRequirements, ResourceUsage, TaskConfig, TaskPriority, TaskResult, TaskState,
+};
 pub use config::Config;
 pub use core::{ExecutionContext, Hook, Repository, Stage};
 pub use error::{
