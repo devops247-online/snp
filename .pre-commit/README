@@ -1,9 +1,0 @@
-This directory is maintained by the SNP (Shell Not Pass) project.
-Learn more: https://github.com/devops247-online/snp
-
-Directory structure:
-- db.db: SQLite database for metadata
-- repos/: Git repository clones
-- envs/: Language environments
-
-Last updated: SystemTime { tv_sec: 1753290143, tv_nsec: 370919690 }
