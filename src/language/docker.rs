@@ -1074,10 +1074,16 @@ impl Language for DockerLanguagePlugin {
         let environment_id = format!("docker-{}", uuid::Uuid::new_v4());
 
         let mut environment_variables = config.environment_variables.clone();
-        environment_variables.insert(
-            "DOCKER_HOST".to_string(),
-            "unix:///var/run/docker.sock".to_string(),
-        );
+        
+        // Set platform-specific Docker host
+        #[cfg(unix)]
+        let docker_host = "unix:///var/run/docker.sock";
+        #[cfg(windows)]
+        let docker_host = "npipe:////./pipe/docker_engine";
+        #[cfg(not(any(unix, windows)))]
+        let docker_host = "tcp://localhost:2376";
+        
+        environment_variables.insert("DOCKER_HOST".to_string(), docker_host.to_string());
 
         Ok(LanguageEnvironment {
             language: "docker".to_string(),
