@@ -40,6 +40,12 @@ pub enum SnpError {
 
     #[error("Hook chaining failed: {0}")]
     HookChaining(#[from] Box<HookChainingError>),
+
+    #[error("Network operation failed: {0}")]
+    Network(#[from] Box<NetworkError>),
+
+    #[error("Filesystem operation failed: {0}")]
+    Filesystem(#[from] Box<FilesystemError>),
 }
 
 /// Configuration-related errors with detailed context
@@ -506,6 +512,12 @@ impl ErrorFormatter {
             SnpError::HookChaining(_) => {
                 error!(error_type = "hook_chaining", error = %error, "Hook chaining failed");
             }
+            SnpError::Network(_) => {
+                error!(error_type = "network", error = %error, "Network operation failed");
+            }
+            SnpError::Filesystem(_) => {
+                error!(error_type = "filesystem", error = %error, "Filesystem operation failed");
+            }
         }
 
         let mut output = String::new();
@@ -552,6 +564,12 @@ impl ErrorFormatter {
             }
             SnpError::HookChaining(chaining_err) => {
                 self.add_hook_chaining_context(&mut output, chaining_err.as_ref());
+            }
+            SnpError::Network(network_err) => {
+                self.add_network_context(&mut output, network_err.as_ref());
+            }
+            SnpError::Filesystem(filesystem_err) => {
+                self.add_filesystem_context(&mut output, filesystem_err.as_ref());
             }
             _ => {}
         }
@@ -869,6 +887,120 @@ impl ErrorFormatter {
             }
         }
     }
+
+    fn add_network_context(&self, output: &mut String, error: &NetworkError) {
+        output.push('\n');
+        match error {
+            NetworkError::RequestFailed {
+                url, status_code, ..
+            } => {
+                output.push_str(&format!("  URL: {url}"));
+                if let Some(code) = status_code {
+                    output.push_str(&format!("\n  Status code: {code}"));
+                }
+            }
+            NetworkError::Timeout { url, duration, .. } => {
+                output.push_str(&format!("  URL: {url}"));
+                output.push_str(&format!("\n  Timeout: {duration:?}"));
+            }
+            NetworkError::DnsResolutionFailed { host, .. } => {
+                output.push_str(&format!("  Host: {host}"));
+            }
+            NetworkError::TlsError { url, .. } => {
+                output.push_str(&format!("  URL: {url}"));
+            }
+            NetworkError::InvalidUrl { url, .. } => {
+                output.push_str(&format!("  URL: {url}"));
+            }
+        }
+    }
+
+    fn add_filesystem_context(&self, output: &mut String, error: &FilesystemError) {
+        output.push('\n');
+        match error {
+            FilesystemError::PermissionDenied { path, operation } => {
+                output.push_str(&format!("  Path: {}", path.display()));
+                output.push_str(&format!("\n  Operation: {operation}"));
+            }
+            FilesystemError::FileNotFound { path, suggestion } => {
+                output.push_str(&format!("  Path: {}", path.display()));
+                if let Some(suggestion) = suggestion {
+                    output.push_str(&format!("\n  Help: {suggestion}"));
+                }
+            }
+            FilesystemError::DirectoryCreationFailed { path, .. } => {
+                output.push_str(&format!("  Path: {}", path.display()));
+            }
+            FilesystemError::FileOperationFailed {
+                path, operation, ..
+            } => {
+                output.push_str(&format!("  Path: {}", path.display()));
+                output.push_str(&format!("\n  Operation: {operation}"));
+            }
+            FilesystemError::DiskSpaceInsufficient {
+                path,
+                required_bytes,
+                available_bytes,
+            } => {
+                output.push_str(&format!("  Path: {}", path.display()));
+                output.push_str(&format!("\n  Required: {required_bytes} bytes"));
+                output.push_str(&format!("\n  Available: {available_bytes} bytes"));
+            }
+        }
+    }
+}
+
+/// Network operation errors
+#[derive(Debug, Error)]
+pub enum NetworkError {
+    #[error("Network request failed: {url}")]
+    RequestFailed {
+        url: String,
+        status_code: Option<u16>,
+        error: String,
+    },
+
+    #[error("Connection timeout: {url}")]
+    Timeout { url: String, duration: Duration },
+
+    #[error("DNS resolution failed: {host}")]
+    DnsResolutionFailed { host: String, error: String },
+
+    #[error("SSL/TLS error: {url}")]
+    TlsError { url: String, error: String },
+
+    #[error("Invalid URL: {url}")]
+    InvalidUrl { url: String, error: String },
+}
+
+/// Filesystem operation errors
+#[derive(Debug, Error)]
+pub enum FilesystemError {
+    #[error("Permission denied: {path}")]
+    PermissionDenied { path: PathBuf, operation: String },
+
+    #[error("File not found: {path}")]
+    FileNotFound {
+        path: PathBuf,
+        suggestion: Option<String>,
+    },
+
+    #[error("Directory creation failed: {path}")]
+    DirectoryCreationFailed { path: PathBuf, error: String },
+
+    #[error("File operation failed: {path}")]
+    FileOperationFailed {
+        path: PathBuf,
+        operation: String,
+        error: String,
+    },
+
+    #[error("Disk space insufficient: {path}")]
+    DiskSpaceInsufficient {
+        path: PathBuf,
+        required_bytes: u64,
+        available_bytes: u64,
+    },
 }
 
 /// Hook chaining errors with detailed context
@@ -968,6 +1100,8 @@ impl SnpError {
             SnpError::Regex(_) => exit_codes::GENERAL_ERROR,
             SnpError::HookChaining(_) => exit_codes::HOOK_FAILURE,
             SnpError::Io(_) => exit_codes::GENERAL_ERROR,
+            SnpError::Network(_) => exit_codes::GENERAL_ERROR,
+            SnpError::Filesystem(_) => exit_codes::GENERAL_ERROR,
         }
     }
 

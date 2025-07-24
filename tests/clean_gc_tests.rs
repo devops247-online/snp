@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
 use snp::error::Result;
-use snp::storage::{ConfigInfo, EnvironmentInfo, RepositoryInfo, Store};
+use snp::storage::Store;
 
 // Test helper utilities
 pub struct TestEnvironment {
@@ -87,23 +87,28 @@ impl TestEnvironment {
     // Helper methods to manipulate timestamps for testing
     fn set_repository_age(
         &self,
-        url: &str,
-        revision: &str,
-        deps: &[String],
-        time: SystemTime,
+        _url: &str,
+        _revision: &str,
+        _deps: &[String],
+        _time: SystemTime,
     ) -> Result<()> {
         // This would require accessing the database directly
         // For now, we'll implement a simpler approach
         Ok(())
     }
 
-    fn set_environment_age(&self, language: &str, deps: &[String], time: SystemTime) -> Result<()> {
+    fn set_environment_age(
+        &self,
+        _language: &str,
+        _deps: &[String],
+        _time: SystemTime,
+    ) -> Result<()> {
         // This would require accessing the database directly
         // For now, we'll implement a simpler approach
         Ok(())
     }
 
-    fn set_config_age(&self, config_path: &Path, time: SystemTime) -> Result<()> {
+    fn set_config_age(&self, _config_path: &Path, _time: SystemTime) -> Result<()> {
         // This would require accessing the database directly
         // For now, we'll implement a simpler approach
         Ok(())
@@ -116,8 +121,8 @@ impl TestEnvironment {
 
         let mut temp_files = Vec::new();
         for i in 0..count {
-            let temp_file = temp_dir.join(format!("temp_file_{}.tmp", i));
-            fs::write(&temp_file, format!("Temporary content {}", i))?;
+            let temp_file = temp_dir.join(format!("temp_file_{i}.tmp"));
+            fs::write(&temp_file, format!("Temporary content {i}"))?;
             temp_files.push(temp_file);
         }
 
@@ -273,13 +278,13 @@ async fn test_repository_cache_cleanup() {
     assert_eq!(repos_before.len(), 2);
 
     // Run cleanup for repositories older than 30 days
-    let cleaned_count = env
+    let _cleaned_count = env
         .store
         .cleanup_environments(Duration::from_secs(30 * 24 * 60 * 60))
         .unwrap();
 
     // Verify cleanup results
-    let repos_after = env.store.list_repositories().unwrap();
+    let _repos_after = env.store.list_repositories().unwrap();
     // Note: The current implementation doesn't distinguish by age, so this test may need adjustment
 }
 
@@ -301,13 +306,13 @@ async fn test_environment_cleanup() {
     assert_eq!(envs_before.len(), 2);
 
     // Run cleanup for environments older than 30 days
-    let cleaned_count = env
+    let _cleaned_count = env
         .store
         .cleanup_environments(Duration::from_secs(30 * 24 * 60 * 60))
         .unwrap();
 
     // Verify cleanup results - should remove old environment
-    let envs_after = env.store.list_environments().unwrap();
+    let _envs_after = env.store.list_environments().unwrap();
     // Note: The current implementation doesn't distinguish by age properly in tests
 }
 
@@ -382,7 +387,7 @@ async fn test_reference_checking() {
 
 #[tokio::test]
 async fn test_safety_validation() {
-    let env = TestEnvironment::new().expect("Failed to create test environment");
+    let _env = TestEnvironment::new().expect("Failed to create test environment");
 
     // TODO: Test safety validation before cleanup
     // This would be part of the SafetyChecker implementation
@@ -390,7 +395,7 @@ async fn test_safety_validation() {
 
 #[tokio::test]
 async fn test_cleanup_rollback() {
-    let env = TestEnvironment::new().expect("Failed to create test environment");
+    let _env = TestEnvironment::new().expect("Failed to create test environment");
 
     // TODO: Test rollback functionality when cleanup fails
     // This would be part of the CleanupManager implementation
@@ -405,10 +410,10 @@ async fn test_usage_tracking() {
     let env = TestEnvironment::new().expect("Failed to create test environment");
 
     // Create and access resources
-    let repo_path = env
+    let _repo_path = env
         .create_mock_repository("https://github.com/test/repo", "v1.0", 1)
         .unwrap();
-    let env_path = env
+    let _env_path = env
         .create_mock_environment("python", &["requests".to_string()], 1)
         .unwrap();
 
@@ -418,7 +423,7 @@ async fn test_usage_tracking() {
 
 #[tokio::test]
 async fn test_last_access_detection() {
-    let env = TestEnvironment::new().expect("Failed to create test environment");
+    let _env = TestEnvironment::new().expect("Failed to create test environment");
 
     // TODO: Test last access time detection
     // This would be part of the UsageTracker implementation
@@ -426,7 +431,7 @@ async fn test_last_access_detection() {
 
 #[tokio::test]
 async fn test_usage_frequency_calculation() {
-    let env = TestEnvironment::new().expect("Failed to create test environment");
+    let _env = TestEnvironment::new().expect("Failed to create test environment");
 
     // TODO: Test usage frequency analysis
     // This would be part of the UsageTracker implementation
@@ -434,7 +439,7 @@ async fn test_usage_frequency_calculation() {
 
 #[tokio::test]
 async fn test_unused_resource_identification() {
-    let env = TestEnvironment::new().expect("Failed to create test environment");
+    let _env = TestEnvironment::new().expect("Failed to create test environment");
 
     // TODO: Test identification of unused resources
     // This would be part of the UsageTracker implementation
@@ -446,7 +451,7 @@ async fn test_unused_resource_identification() {
 
 #[tokio::test]
 async fn test_clean_all_caches() {
-    let env = TestEnvironment::new().expect("Failed to create test environment");
+    let _env = TestEnvironment::new().expect("Failed to create test environment");
 
     // TODO: Test default clean command behavior
     // This would test the CLI clean command
@@ -454,7 +459,7 @@ async fn test_clean_all_caches() {
 
 #[tokio::test]
 async fn test_selective_cleaning_flags() {
-    let env = TestEnvironment::new().expect("Failed to create test environment");
+    let _env = TestEnvironment::new().expect("Failed to create test environment");
 
     // TODO: Test --repos, --envs, --temp flags
     // This would test the enhanced CLI with selective flags
@@ -462,7 +467,7 @@ async fn test_selective_cleaning_flags() {
 
 #[tokio::test]
 async fn test_age_based_cleaning() {
-    let env = TestEnvironment::new().expect("Failed to create test environment");
+    let _env = TestEnvironment::new().expect("Failed to create test environment");
 
     // TODO: Test --older-than flag functionality
     // This would test age-based cleanup
@@ -470,7 +475,7 @@ async fn test_age_based_cleaning() {
 
 #[tokio::test]
 async fn test_dry_run_mode() {
-    let env = TestEnvironment::new().expect("Failed to create test environment");
+    let _env = TestEnvironment::new().expect("Failed to create test environment");
 
     // TODO: Test --dry-run flag functionality
     // This would test dry-run mode that shows what would be cleaned
@@ -482,7 +487,7 @@ async fn test_dry_run_mode() {
 
 #[tokio::test]
 async fn test_permission_denied_handling() {
-    let env = TestEnvironment::new().expect("Failed to create test environment");
+    let _env = TestEnvironment::new().expect("Failed to create test environment");
 
     // TODO: Test handling of file permission issues
     // This would test error handling during cleanup
@@ -490,7 +495,7 @@ async fn test_permission_denied_handling() {
 
 #[tokio::test]
 async fn test_disk_full_handling() {
-    let env = TestEnvironment::new().expect("Failed to create test environment");
+    let _env = TestEnvironment::new().expect("Failed to create test environment");
 
     // TODO: Test handling of disk space issues during cleanup
     // This would be challenging to test reliably
@@ -498,7 +503,7 @@ async fn test_disk_full_handling() {
 
 #[tokio::test]
 async fn test_corrupted_cache_handling() {
-    let env = TestEnvironment::new().expect("Failed to create test environment");
+    let _env = TestEnvironment::new().expect("Failed to create test environment");
 
     // TODO: Test handling of corrupted cache files
     // This would test error recovery mechanisms
@@ -506,7 +511,7 @@ async fn test_corrupted_cache_handling() {
 
 #[tokio::test]
 async fn test_concurrent_access_handling() {
-    let env = TestEnvironment::new().expect("Failed to create test environment");
+    let _env = TestEnvironment::new().expect("Failed to create test environment");
 
     // TODO: Test handling of concurrent resource access
     // This would test file locking and concurrent safety
@@ -518,7 +523,7 @@ async fn test_concurrent_access_handling() {
 
 #[tokio::test]
 async fn test_large_cache_cleanup_performance() {
-    let env = TestEnvironment::new().expect("Failed to create test environment");
+    let _env = TestEnvironment::new().expect("Failed to create test environment");
 
     // TODO: Test performance with large cache directories
     // This would create many resources and test cleanup speed
@@ -526,7 +531,7 @@ async fn test_large_cache_cleanup_performance() {
 
 #[tokio::test]
 async fn test_cleanup_progress_reporting() {
-    let env = TestEnvironment::new().expect("Failed to create test environment");
+    let _env = TestEnvironment::new().expect("Failed to create test environment");
 
     // TODO: Test progress reporting during cleanup
     // This would test the progress reporting functionality
@@ -596,6 +601,6 @@ async fn test_cleanup_space_reclamation() {
 
     // Verify space was reclaimed (size should be reduced)
     // Note: This might not always be true depending on what gets cleaned up
-    println!("Cache size before cleanup: {} bytes", size_before);
-    println!("Cache size after cleanup: {} bytes", size_after);
+    println!("Cache size before cleanup: {size_before} bytes");
+    println!("Cache size after cleanup: {size_after} bytes");
 }
