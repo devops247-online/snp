@@ -839,7 +839,6 @@ pub struct DockerSystemInfo {
     pub cgroup_version: Option<String>,
 }
 
-
 #[derive(Debug, Clone)]
 pub struct Dockerfile {
     pub path: PathBuf,
@@ -1014,7 +1013,6 @@ impl Default for ImageConfig {
     }
 }
 
-
 impl Default for SecurityConfig {
     fn default() -> Self {
         Self {
@@ -1074,7 +1072,7 @@ impl Language for DockerLanguagePlugin {
         let environment_id = format!("docker-{}", uuid::Uuid::new_v4());
 
         let mut environment_variables = config.environment_variables.clone();
-        
+
         // Set platform-specific Docker host
         #[cfg(unix)]
         let docker_host = "unix:///var/run/docker.sock";
@@ -1082,7 +1080,7 @@ impl Language for DockerLanguagePlugin {
         let docker_host = "npipe:////./pipe/docker_engine";
         #[cfg(not(any(unix, windows)))]
         let docker_host = "tcp://localhost:2376";
-        
+
         environment_variables.insert("DOCKER_HOST".to_string(), docker_host.to_string());
 
         Ok(LanguageEnvironment {
