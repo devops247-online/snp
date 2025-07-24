@@ -275,6 +275,11 @@ impl SchemaValidator {
 
     // Partial validation for incremental checking
     pub fn validate_hook(&mut self, hook: &Hook, hook_idx: usize) -> ValidationResult {
+        self.validate_hook_with_context(hook, hook_idx, None)
+    }
+
+    // Validate hook with repository context
+    pub fn validate_hook_with_context(&mut self, hook: &Hook, hook_idx: usize, repo_type: Option<&str>) -> ValidationResult {
         let mut result = ValidationResult::new();
 
         // Validate required fields
@@ -289,7 +294,9 @@ impl SchemaValidator {
             );
         }
 
-        if hook.entry.is_empty() {
+        // For meta hooks, entry is not required (it's provided by the system)
+        let is_meta_hook = repo_type == Some("meta");
+        if hook.entry.is_empty() && !is_meta_hook {
             result.add_error(
                 ValidationError::new(
                     ValidationErrorType::MissingRequiredField,
@@ -455,7 +462,7 @@ impl SchemaValidator {
 
         // Validate each hook
         for (hook_idx, hook) in repo.hooks.iter().enumerate() {
-            let hook_result = self.validate_hook(hook, hook_idx);
+            let hook_result = self.validate_hook_with_context(hook, hook_idx, Some(&repo.repo));
             result.merge(hook_result);
         }
 
@@ -1167,4 +1174,238 @@ mod tests {
         let migrations = validator.suggest_migrations(&config);
         assert!(migrations.is_empty()); // No migrations needed for simple config
     }
+}
+
+/// Manifest hook structure for validation
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ManifestHook {
+    pub id: String,
+    pub name: String,
+    pub entry: String,
+    pub language: String,
+    #[serde(default)]
+    pub alias: Option<String>,
+    #[serde(default)]
+    pub files: Option<String>,
+    #[serde(default)]
+    pub exclude: Option<String>,
+    #[serde(default)]
+    pub types: Option<Vec<String>>,
+    #[serde(default)]
+    pub types_or: Option<Vec<String>>,
+    #[serde(default)]
+    pub exclude_types: Option<Vec<String>>,
+    #[serde(default)]
+    pub additional_dependencies: Option<Vec<String>>,
+    #[serde(default)]
+    pub args: Option<Vec<String>>,
+    #[serde(default)]
+    pub always_run: Option<bool>,
+    #[serde(default)]
+    pub fail_fast: Option<bool>,
+    #[serde(default)]
+    pub pass_filenames: Option<bool>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub language_version: Option<String>,
+    #[serde(default)]
+    pub log_file: Option<String>,
+    #[serde(default)]
+    pub require_serial: Option<bool>,
+    #[serde(default)]
+    pub stages: Option<Vec<String>>,
+    #[serde(default)]
+    pub verbose: Option<bool>,
+}
+
+/// Manifest validation functions
+pub fn validate_manifest_file(file_path: &str) -> Result<()> {
+    let path = std::path::Path::new(file_path);
+    
+    if !path.exists() {
+        return Err(SnpError::Config(Box::new(ConfigError::NotFound {
+            path: path.to_path_buf(),
+            suggestion: Some("Check that the manifest file exists".to_string()),
+        })));
+    }
+
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        SnpError::Config(Box::new(ConfigError::ReadError {
+            path: path.to_path_buf(),
+            error: e.to_string(),
+        }))
+    })?;
+
+    validate_manifest_content(&content)
+}
+
+pub fn validate_manifest_content(content: &str) -> Result<()> {
+    // Parse YAML content
+    let hooks: Vec<ManifestHook> = serde_yaml::from_str(content).map_err(|e| {
+        SnpError::Config(Box::new(ConfigError::ParseError {
+            file_path: None,
+            error: format!("YAML parsing failed: {e}"),
+            line: None,
+            column: None,
+        }))
+    })?;
+
+    // Validate manifest structure
+    let mut validator = SchemaValidator::new(ValidationConfig::default());
+    let validation_result = validate_manifest_hooks(&mut validator, &hooks)?;
+
+    if !validation_result.is_valid {
+        let error_messages: Vec<String> = validation_result
+            .errors
+            .iter()
+            .map(|e| format!("{} (at {})", e.message, e.field_path))
+            .collect();
+        
+        return Err(SnpError::Config(Box::new(ConfigError::ValidationError {
+            errors: error_messages,
+            file_path: None,
+        })));
+    }
+
+    Ok(())
+}
+
+fn validate_manifest_hooks(
+    validator: &mut SchemaValidator,
+    hooks: &[ManifestHook],
+) -> Result<ValidationResult> {
+    let mut result = ValidationResult::new();
+    let mut hook_ids = HashSet::new();
+
+    // Validate each hook
+    for (hook_idx, manifest_hook) in hooks.iter().enumerate() {
+        // Check required fields
+        if manifest_hook.id.is_empty() {
+            result.add_error(
+                ValidationError::new(
+                    ValidationErrorType::MissingRequiredField,
+                    "Hook ID cannot be empty",
+                    format!("hooks[{hook_idx}].id"),
+                )
+                .with_suggestion("Provide a unique identifier for this hook"),
+            );
+        }
+
+        if manifest_hook.name.is_empty() {
+            result.add_error(
+                ValidationError::new(
+                    ValidationErrorType::MissingRequiredField,
+                    "Hook name cannot be empty",
+                    format!("hooks[{hook_idx}].name"),
+                )
+                .with_suggestion("Provide a descriptive name for this hook"),
+            );
+        }
+
+        if manifest_hook.entry.is_empty() {
+            result.add_error(
+                ValidationError::new(
+                    ValidationErrorType::MissingRequiredField,
+                    "Hook entry cannot be empty",
+                    format!("hooks[{hook_idx}].entry"),
+                )
+                .with_suggestion("Specify the command to execute for this hook"),
+            );
+        }
+
+        if manifest_hook.language.is_empty() {
+            result.add_error(
+                ValidationError::new(
+                    ValidationErrorType::MissingRequiredField,
+                    "Hook language cannot be empty",
+                    format!("hooks[{hook_idx}].language"),
+                )
+                .with_suggestion("Specify the language for this hook (e.g., 'python', 'system')"),
+            );
+        } else if !validator.supported_languages.contains(&manifest_hook.language) {
+            result.add_warning(ValidationWarning {
+                message: format!("Unknown language: '{}'", manifest_hook.language),
+                field_path: format!("hooks[{hook_idx}].language"),
+                suggestion: Some(validator.get_similar_languages(&manifest_hook.language)),
+                warning_type: WarningType::UnknownLanguage,
+            });
+        }
+
+        // Check for duplicate hook IDs
+        if hook_ids.contains(&manifest_hook.id) {
+            result.add_error(
+                ValidationError::new(
+                    ValidationErrorType::CrossReferenceError,
+                    format!("Duplicate hook ID: '{}'", manifest_hook.id),
+                    format!("hooks[{hook_idx}].id"),
+                )
+                .with_suggestion("Hook IDs must be unique within the manifest"),
+            );
+        } else {
+            hook_ids.insert(manifest_hook.id.clone());
+        }
+
+        // Validate file patterns if present
+        if let Some(ref files) = manifest_hook.files {
+            if validator.compile_regex(files).is_err() {
+                result.add_error(
+                    ValidationError::new(
+                        ValidationErrorType::InvalidFormat,
+                        "Invalid files regex pattern",
+                        format!("hooks[{hook_idx}].files"),
+                    )
+                    .with_suggestion("Use valid regex syntax for file patterns"),
+                );
+            }
+        }
+
+        if let Some(ref exclude) = manifest_hook.exclude {
+            if validator.compile_regex(exclude).is_err() {
+                result.add_error(
+                    ValidationError::new(
+                        ValidationErrorType::InvalidFormat,
+                        "Invalid exclude regex pattern",
+                        format!("hooks[{hook_idx}].exclude"),
+                    )
+                    .with_suggestion("Use valid regex syntax for exclude patterns"),
+                );
+            }
+        }
+
+        // Validate stages if present
+        if let Some(ref stages) = manifest_hook.stages {
+            for stage in stages {
+                if !validator.supported_stages.contains(stage) {
+                    result.add_error(
+                        ValidationError::new(
+                            ValidationErrorType::InvalidFieldValue,
+                            format!("Invalid stage: '{stage}'"),
+                            format!("hooks[{hook_idx}].stages"),
+                        )
+                        .with_suggestion("Use valid git hook stages"),
+                    );
+                }
+            }
+        }
+
+        // Validate types if present
+        if let Some(ref types) = manifest_hook.types {
+            for type_tag in types {
+                // Basic type validation - could be enhanced with actual type checking
+                if type_tag.is_empty() {
+                    result.add_error(
+                        ValidationError::new(
+                            ValidationErrorType::InvalidFieldValue,
+                            "Empty type tag",
+                            format!("hooks[{hook_idx}].types"),
+                        )
+                        .with_suggestion("Provide valid type tags"),
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(result)
 }

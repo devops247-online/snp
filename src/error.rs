@@ -103,6 +103,26 @@ pub enum ConfigError {
         hook_id: String,
         available_hooks: Vec<String>,
     },
+
+    #[error("Failed to read file: {path}")]
+    ReadError {
+        path: PathBuf,
+        error: String,
+    },
+
+    #[error("Failed to parse configuration: {error}")]
+    ParseError {
+        file_path: Option<PathBuf>,
+        error: String,
+        line: Option<u32>,
+        column: Option<u32>,
+    },
+
+    #[error("Configuration validation failed")]
+    ValidationError {
+        errors: Vec<String>,
+        file_path: Option<PathBuf>,
+    },
 }
 
 /// Git operation errors with context

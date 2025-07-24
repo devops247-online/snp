@@ -610,10 +610,87 @@ impl Cli {
                     Ok(0)
                 }
             }
-            // TODO: Implement all other commands
+            Some(Commands::ValidateConfig { filenames }) => {
+                use crate::validation::{SchemaValidator, ValidationConfig};
+                use std::path::Path;
+
+                let mut validator = SchemaValidator::new(ValidationConfig::default());
+                let mut exit_code = 0;
+
+                // If no filenames provided, use default config file
+                let files_to_validate = if filenames.is_empty() {
+                    vec![self.config.clone()]
+                } else {
+                    filenames.clone()
+                };
+
+                for filename in files_to_validate {
+                    let path = Path::new(&filename);
+                    
+                    if !self.quiet {
+                        println!("Validating config file: {filename}");
+                    }
+                    
+                    let result = validator.validate_file(path);
+                    
+                    if result.is_valid {
+                        if self.verbose {
+                            println!("✓ {filename} is valid");
+                        }
+                    } else {
+                        exit_code = 1;
+                        eprintln!("✗ {filename} has validation errors:");
+                        
+                        for error in &result.errors {
+                            eprintln!("  Error: {} (at {})", error.message, error.field_path);
+                            if let Some(ref suggestion) = error.suggestion {
+                                eprintln!("    Suggestion: {suggestion}");
+                            }
+                        }
+                        
+                        for warning in &result.warnings {
+                            if self.verbose {
+                                eprintln!("  Warning: {} (at {})", warning.message, warning.field_path);
+                                if let Some(ref suggestion) = warning.suggestion {
+                                    eprintln!("    Suggestion: {suggestion}");
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Ok(exit_code)
+            }
+            Some(Commands::ValidateManifest { filenames }) => {
+                use crate::validation::{validate_manifest_file};
+
+                let mut exit_code = 0;
+
+                for filename in filenames {
+                    if !self.quiet {
+                        println!("Validating manifest file: {filename}");
+                    }
+                    
+                    match validate_manifest_file(filename) {
+                        Ok(_) => {
+                            if self.verbose {
+                                println!("✓ {filename} is valid");
+                            }
+                        }
+                        Err(e) => {
+                            exit_code = 1;
+                            eprintln!("✗ {filename}: {e}");
+                        }
+                    }
+                }
+
+                Ok(exit_code)
+            }
             _ => {
                 // Default to run command when no subcommand provided
-                println!("Running hooks (default)...");
+                if !self.quiet {
+                    println!("Running hooks (default)...");
+                }
                 let repo_path = std::env::current_dir().map_err(|e| {
                     crate::error::SnpError::Cli(Box::new(crate::error::CliError::RuntimeError {
                         message: format!("Failed to get current directory: {e}"),
