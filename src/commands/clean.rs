@@ -65,9 +65,14 @@ impl CacheAnalyzer {
     }
 
     /// Find repositories older than the specified duration
-    pub async fn find_old_repositories(&self, max_age: Duration) -> Result<Vec<crate::storage::RepositoryInfo>> {
+    pub async fn find_old_repositories(
+        &self,
+        max_age: Duration,
+    ) -> Result<Vec<crate::storage::RepositoryInfo>> {
         let all_repos = self.store.list_repositories()?;
-        let cutoff_time = SystemTime::now().checked_sub(max_age).unwrap_or(SystemTime::UNIX_EPOCH);
+        let cutoff_time = SystemTime::now()
+            .checked_sub(max_age)
+            .unwrap_or(SystemTime::UNIX_EPOCH);
 
         let old_repos = all_repos
             .into_iter()
@@ -78,9 +83,14 @@ impl CacheAnalyzer {
     }
 
     /// Find environments older than the specified duration
-    pub async fn find_old_environments(&self, max_age: Duration) -> Result<Vec<crate::storage::EnvironmentInfo>> {
+    pub async fn find_old_environments(
+        &self,
+        max_age: Duration,
+    ) -> Result<Vec<crate::storage::EnvironmentInfo>> {
         let all_envs = self.store.list_environments()?;
-        let cutoff_time = SystemTime::now().checked_sub(max_age).unwrap_or(SystemTime::UNIX_EPOCH);
+        let cutoff_time = SystemTime::now()
+            .checked_sub(max_age)
+            .unwrap_or(SystemTime::UNIX_EPOCH);
 
         let old_envs = all_envs
             .into_iter()
@@ -105,7 +115,7 @@ impl CacheAnalyzer {
     async fn find_temp_files(&self, cache_dir: &Path) -> Result<Vec<PathBuf>> {
         let mut temp_files = Vec::new();
         let temp_dir = cache_dir.join("temp");
-        
+
         if temp_dir.exists() {
             let entries = std::fs::read_dir(&temp_dir).map_err(|e| {
                 SnpError::Storage(Box::new(StorageError::CacheDirectoryFailed {
@@ -191,7 +201,9 @@ impl CleanupManager {
         if config.repos || (!config.envs && !config.temp) {
             result.repos_cleaned = self.clean_repositories(config).await?;
             if result.repos_cleaned > 0 {
-                result.operations_performed.push(format!("Cleaned {} repositories", result.repos_cleaned));
+                result
+                    .operations_performed
+                    .push(format!("Cleaned {} repositories", result.repos_cleaned));
             }
         }
 
@@ -199,7 +211,9 @@ impl CleanupManager {
         if config.envs || (!config.repos && !config.temp) {
             result.envs_cleaned = self.clean_environments(config).await?;
             if result.envs_cleaned > 0 {
-                result.operations_performed.push(format!("Cleaned {} environments", result.envs_cleaned));
+                result
+                    .operations_performed
+                    .push(format!("Cleaned {} environments", result.envs_cleaned));
             }
         }
 
@@ -207,7 +221,10 @@ impl CleanupManager {
         if config.temp || (!config.repos && !config.envs) {
             result.temp_files_cleaned = self.clean_temp_files(config).await?;
             if result.temp_files_cleaned > 0 {
-                result.operations_performed.push(format!("Cleaned {} temporary files", result.temp_files_cleaned));
+                result.operations_performed.push(format!(
+                    "Cleaned {} temporary files",
+                    result.temp_files_cleaned
+                ));
             }
         }
 
@@ -244,12 +261,15 @@ impl CleanupManager {
         if config.dry_run {
             // In dry run mode, just count what would be cleaned
             let analyzer = CacheAnalyzer::new(self.store.clone());
-            
+
             if let Some(max_age) = config.older_than {
                 let old_repos = analyzer.find_old_repositories(max_age).await?;
                 println!("Would clean {} old repositories:", old_repos.len());
                 for repo in &old_repos {
-                    println!("  - {} (rev: {}, last used: {:?})", repo.url, repo.revision, repo.last_used);
+                    println!(
+                        "  - {} (rev: {}, last used: {:?})",
+                        repo.url, repo.revision, repo.last_used
+                    );
                 }
                 return Ok(old_repos.len());
             } else {
@@ -269,9 +289,10 @@ impl CleanupManager {
             // Clean all repositories
             let repos = self.store.list_repositories()?;
             let count = repos.len();
-            
+
             // Use garbage collection to clean all
-            self.store.cleanup_old_repositories(Duration::from_secs(0))?;
+            self.store
+                .cleanup_old_repositories(Duration::from_secs(0))?;
             Ok(count)
         }
     }
@@ -281,12 +302,15 @@ impl CleanupManager {
         if config.dry_run {
             // In dry run mode, just count what would be cleaned
             let analyzer = CacheAnalyzer::new(self.store.clone());
-            
+
             if let Some(max_age) = config.older_than {
                 let old_envs = analyzer.find_old_environments(max_age).await?;
                 println!("Would clean {} old environments:", old_envs.len());
                 for env in &old_envs {
-                    println!("  - {} with deps: {:?} (last used: {:?})", env.language, env.dependencies, env.last_used);
+                    println!(
+                        "  - {} with deps: {:?} (last used: {:?})",
+                        env.language, env.dependencies, env.last_used
+                    );
                 }
                 return Ok(old_envs.len());
             } else {
@@ -306,7 +330,7 @@ impl CleanupManager {
             // Clean all environments
             let envs = self.store.list_environments()?;
             let count = envs.len();
-            
+
             // Use cleanup with zero age to clean all
             self.store.cleanup_environments(Duration::from_secs(0))?;
             Ok(count)
@@ -317,7 +341,7 @@ impl CleanupManager {
     async fn clean_temp_files(&self, config: &CleanConfig) -> Result<usize> {
         let cache_dir = self.store.cache_directory();
         let temp_dir = cache_dir.join("temp");
-        
+
         if !temp_dir.exists() {
             return Ok(0);
         }
@@ -337,12 +361,14 @@ impl CleanupManager {
                     error: e.to_string(),
                 }))
             })?;
-            
+
             let path = entry.path();
             let should_clean = if let Some(max_age) = config.older_than {
                 if let Ok(metadata) = entry.metadata() {
                     if let Ok(modified) = metadata.modified() {
-                        let cutoff_time = SystemTime::now().checked_sub(max_age).unwrap_or(SystemTime::UNIX_EPOCH);
+                        let cutoff_time = SystemTime::now()
+                            .checked_sub(max_age)
+                            .unwrap_or(SystemTime::UNIX_EPOCH);
                         modified < cutoff_time
                     } else {
                         true // If we can't get modified time, assume it should be cleaned
@@ -392,9 +418,9 @@ impl CleanupManager {
 pub async fn execute_clean_command(config: &CleanConfig) -> Result<CleanupResult> {
     let store = Store::new()?;
     let cleanup_manager = CleanupManager::new(store);
-    
+
     let result = cleanup_manager.execute_cleanup(config).await?;
-    
+
     // Report results
     if config.dry_run {
         println!("\nDry run summary:");
@@ -407,12 +433,12 @@ pub async fn execute_clean_command(config: &CleanConfig) -> Result<CleanupResult
         println!("Cleaned {} environments", result.envs_cleaned);
         println!("Cleaned {} temporary files", result.temp_files_cleaned);
         println!("Space reclaimed: {} bytes", result.space_reclaimed);
-        
+
         for operation in &result.operations_performed {
             println!("✓ {operation}");
         }
     }
-    
+
     Ok(result)
 }
 
@@ -420,9 +446,9 @@ pub async fn execute_clean_command(config: &CleanConfig) -> Result<CleanupResult
 pub async fn execute_gc_command(config: &GcConfig) -> Result<CleanupResult> {
     let store = Store::new()?;
     let cleanup_manager = CleanupManager::new(store);
-    
+
     let result = cleanup_manager.execute_gc(config).await?;
-    
+
     // Report results
     if config.dry_run {
         println!("\nGarbage collection dry run summary:");
@@ -435,11 +461,11 @@ pub async fn execute_gc_command(config: &GcConfig) -> Result<CleanupResult> {
         println!("Cleaned {} environments", result.envs_cleaned);
         println!("Cleaned {} temporary files", result.temp_files_cleaned);
         println!("Space reclaimed: {} bytes", result.space_reclaimed);
-        
+
         for operation in &result.operations_performed {
             println!("✓ {operation}");
         }
     }
-    
+
     Ok(result)
 }

@@ -453,7 +453,8 @@ impl Cli {
                     repos: *repos,
                     envs: *envs,
                     temp: *temp,
-                    older_than: older_than.map(|days| Duration::from_secs(days as u64 * 24 * 60 * 60)),
+                    older_than: older_than
+                        .map(|days| Duration::from_secs(days as u64 * 24 * 60 * 60)),
                     dry_run: *dry_run,
                 };
 
@@ -473,7 +474,10 @@ impl Cli {
                     }
                 }
             }
-            Some(Commands::Gc { aggressive, dry_run }) => {
+            Some(Commands::Gc {
+                aggressive,
+                dry_run,
+            }) => {
                 use crate::commands::clean::{execute_gc_command, GcConfig};
 
                 // Create gc configuration
@@ -626,13 +630,13 @@ impl Cli {
 
                 for filename in files_to_validate {
                     let path = Path::new(&filename);
-                    
+
                     if !self.quiet {
                         println!("Validating config file: {filename}");
                     }
-                    
+
                     let result = validator.validate_file(path);
-                    
+
                     if result.is_valid {
                         if self.verbose {
                             println!("✓ {filename} is valid");
@@ -640,17 +644,20 @@ impl Cli {
                     } else {
                         exit_code = 1;
                         eprintln!("✗ {filename} has validation errors:");
-                        
+
                         for error in &result.errors {
                             eprintln!("  Error: {} (at {})", error.message, error.field_path);
                             if let Some(ref suggestion) = error.suggestion {
                                 eprintln!("    Suggestion: {suggestion}");
                             }
                         }
-                        
+
                         for warning in &result.warnings {
                             if self.verbose {
-                                eprintln!("  Warning: {} (at {})", warning.message, warning.field_path);
+                                eprintln!(
+                                    "  Warning: {} (at {})",
+                                    warning.message, warning.field_path
+                                );
                                 if let Some(ref suggestion) = warning.suggestion {
                                     eprintln!("    Suggestion: {suggestion}");
                                 }
@@ -662,7 +669,7 @@ impl Cli {
                 Ok(exit_code)
             }
             Some(Commands::ValidateManifest { filenames }) => {
-                use crate::validation::{validate_manifest_file};
+                use crate::validation::validate_manifest_file;
 
                 let mut exit_code = 0;
 
@@ -670,7 +677,7 @@ impl Cli {
                     if !self.quiet {
                         println!("Validating manifest file: {filename}");
                     }
-                    
+
                     match validate_manifest_file(filename) {
                         Ok(_) => {
                             if self.verbose {

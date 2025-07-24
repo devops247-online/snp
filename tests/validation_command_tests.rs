@@ -163,7 +163,7 @@ fn test_validate_manifest_command_nonexistent_file() {
 #[test]
 fn test_validation_commands_exit_codes() {
     // Test that exit codes match Python pre-commit behavior
-    
+
     // Valid config should return 0
     let valid_config = r#"
 repos:
@@ -175,7 +175,7 @@ repos:
         entry: black
 "#;
     let (_temp_dir, config_path) = create_temp_config(valid_config);
-    
+
     let output = Command::cargo_bin("snp")
         .unwrap()
         .arg("validate-config")
@@ -183,7 +183,7 @@ repos:
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(0));
-    
+
     // Invalid config should return 1
     let invalid_config = r#"
 repos:
@@ -195,7 +195,7 @@ repos:
         language: system
 "#;
     let (_temp_dir2, invalid_path) = create_temp_config(invalid_config);
-    
+
     let output2 = Command::cargo_bin("snp")
         .unwrap()
         .arg("validate-config")
@@ -215,16 +215,16 @@ repos:
       - id: check-hooks-apply
       - id: check-useless-excludes
 "#;
-    
+
     let (_temp_dir, config_path) = create_temp_config(meta_config);
-    
+
     Command::cargo_bin("snp")
         .unwrap()
         .arg("validate-config")
         .arg(&config_path)
         .assert()
         .success(); // Meta hooks should be valid
-    
+
     // Test with local repository
     let local_config = r#"
 repos:
@@ -236,9 +236,9 @@ repos:
         language: system
         files: \.py$
 "#;
-    
+
     let (_temp_dir2, local_path) = create_temp_config(local_config);
-    
+
     Command::cargo_bin("snp")
         .unwrap()
         .arg("validate-config")

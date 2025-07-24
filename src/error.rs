@@ -105,10 +105,7 @@ pub enum ConfigError {
     },
 
     #[error("Failed to read file: {path}")]
-    ReadError {
-        path: PathBuf,
-        error: String,
-    },
+    ReadError { path: PathBuf, error: String },
 
     #[error("Failed to parse configuration: {error}")]
     ParseError {

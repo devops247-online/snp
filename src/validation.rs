@@ -279,7 +279,12 @@ impl SchemaValidator {
     }
 
     // Validate hook with repository context
-    pub fn validate_hook_with_context(&mut self, hook: &Hook, hook_idx: usize, repo_type: Option<&str>) -> ValidationResult {
+    pub fn validate_hook_with_context(
+        &mut self,
+        hook: &Hook,
+        hook_idx: usize,
+        repo_type: Option<&str>,
+    ) -> ValidationResult {
         let mut result = ValidationResult::new();
 
         // Validate required fields
@@ -1222,7 +1227,7 @@ pub struct ManifestHook {
 /// Manifest validation functions
 pub fn validate_manifest_file(file_path: &str) -> Result<()> {
     let path = std::path::Path::new(file_path);
-    
+
     if !path.exists() {
         return Err(SnpError::Config(Box::new(ConfigError::NotFound {
             path: path.to_path_buf(),
@@ -1261,7 +1266,7 @@ pub fn validate_manifest_content(content: &str) -> Result<()> {
             .iter()
             .map(|e| format!("{} (at {})", e.message, e.field_path))
             .collect();
-        
+
         return Err(SnpError::Config(Box::new(ConfigError::ValidationError {
             errors: error_messages,
             file_path: None,
@@ -1323,7 +1328,10 @@ fn validate_manifest_hooks(
                 )
                 .with_suggestion("Specify the language for this hook (e.g., 'python', 'system')"),
             );
-        } else if !validator.supported_languages.contains(&manifest_hook.language) {
+        } else if !validator
+            .supported_languages
+            .contains(&manifest_hook.language)
+        {
             result.add_warning(ValidationWarning {
                 message: format!("Unknown language: '{}'", manifest_hook.language),
                 field_path: format!("hooks[{hook_idx}].language"),
