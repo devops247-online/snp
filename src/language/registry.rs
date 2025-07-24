@@ -125,6 +125,9 @@ impl LanguageRegistry {
         let golang_plugin = Arc::new(super::golang::GoLanguagePlugin::new());
         self.register_plugin(golang_plugin)?;
 
+        let ruby_plugin = Arc::new(super::ruby::RubyLanguagePlugin::new());
+        self.register_plugin(ruby_plugin)?;
+
         Ok(())
     }
 
