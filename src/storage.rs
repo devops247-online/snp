@@ -1041,7 +1041,7 @@ impl Store {
     }
 
     /// Clean up old repositories
-    fn cleanup_old_repositories(&self, max_age: Duration) -> Result<usize> {
+    pub fn cleanup_old_repositories(&self, max_age: Duration) -> Result<usize> {
         let connection = self.connection.lock().unwrap();
         let cutoff_time = Self::system_time_to_timestamp(
             SystemTime::now()

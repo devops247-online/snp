@@ -124,10 +124,38 @@ pub enum Commands {
     },
 
     /// Clean out pre-commit files
-    Clean,
+    Clean {
+        /// Clean only repository caches
+        #[arg(long)]
+        repos: bool,
 
-    /// Clean unused cached repos
-    Gc,
+        /// Clean only language environments
+        #[arg(long)]
+        envs: bool,
+
+        /// Clean only temporary files
+        #[arg(long)]
+        temp: bool,
+
+        /// Clean items older than specified days
+        #[arg(long)]
+        older_than: Option<u32>,
+
+        /// Show what would be cleaned without removing
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Clean unused cached repos (garbage collection)
+    Gc {
+        /// More thorough cleanup including recent items
+        #[arg(long)]
+        aggressive: bool,
+
+        /// Show what would be cleaned without removing
+        #[arg(long)]
+        dry_run: bool,
+    },
 
     /// Install hook environments for all environments in config
     InstallHooks,
@@ -411,10 +439,64 @@ impl Cli {
 
                 Ok(0)
             }
-            Some(Commands::Clean) => {
-                println!("Cleaning pre-commit files...");
-                // TODO: Implement clean command
-                Ok(0)
+            Some(Commands::Clean {
+                repos,
+                envs,
+                temp,
+                older_than,
+                dry_run,
+            }) => {
+                use crate::commands::clean::{execute_clean_command, CleanConfig};
+
+                // Create clean configuration
+                let clean_config = CleanConfig {
+                    repos: *repos,
+                    envs: *envs,
+                    temp: *temp,
+                    older_than: older_than.map(|days| Duration::from_secs(days as u64 * 24 * 60 * 60)),
+                    dry_run: *dry_run,
+                };
+
+                // Execute clean command
+                match execute_clean_command(&clean_config).await {
+                    Ok(_result) => {
+                        if !self.quiet {
+                            println!("Clean operation completed successfully");
+                        }
+                        Ok(0)
+                    }
+                    Err(e) => {
+                        if !self.quiet {
+                            eprintln!("Clean operation failed: {e}");
+                        }
+                        Ok(1)
+                    }
+                }
+            }
+            Some(Commands::Gc { aggressive, dry_run }) => {
+                use crate::commands::clean::{execute_gc_command, GcConfig};
+
+                // Create gc configuration
+                let gc_config = GcConfig {
+                    aggressive: *aggressive,
+                    dry_run: *dry_run,
+                };
+
+                // Execute gc command
+                match execute_gc_command(&gc_config).await {
+                    Ok(_result) => {
+                        if !self.quiet {
+                            println!("Garbage collection completed successfully");
+                        }
+                        Ok(0)
+                    }
+                    Err(e) => {
+                        if !self.quiet {
+                            eprintln!("Garbage collection failed: {e}");
+                        }
+                        Ok(1)
+                    }
+                }
             }
             Some(Commands::Uninstall { hook_type }) => {
                 use crate::install::{GitHookManager, UninstallConfig};
