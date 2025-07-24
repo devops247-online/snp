@@ -4,6 +4,7 @@
 use crate::config::Config;
 use crate::error::{Result, SnpError};
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info};
