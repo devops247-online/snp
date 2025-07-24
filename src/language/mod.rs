@@ -5,6 +5,7 @@ pub mod base;
 pub mod dependency;
 pub mod environment;
 pub mod executor;
+pub mod nodejs;
 pub mod python;
 pub mod registry;
 pub mod rust;
@@ -22,6 +23,7 @@ pub use environment::{
     IsolationLevel, LanguageEnvironment, ValidationIssue, ValidationReport,
 };
 pub use executor::{ExecutionCache, LanguageHookExecutor};
+pub use nodejs::NodejsLanguagePlugin;
 pub use python::PythonLanguagePlugin;
 pub use registry::{LanguageRegistry, PluginMetadata};
 pub use rust::RustLanguagePlugin;
