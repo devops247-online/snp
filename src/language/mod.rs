@@ -3,6 +3,7 @@
 
 pub mod base;
 pub mod dependency;
+pub mod docker;
 pub mod environment;
 pub mod executor;
 pub mod nodejs;
@@ -18,6 +19,7 @@ pub use dependency::{
     Dependency, DependencyConflict, DependencyManager, DependencyManagerConfig, DependencySource,
     InstallationResult, InstalledPackage, ResolvedDependency, UpdateResult, VersionSpec,
 };
+pub use docker::DockerLanguagePlugin;
 pub use environment::{
     CacheStrategy, EnvironmentConfig, EnvironmentInfo, EnvironmentManager, EnvironmentMetadata,
     IsolationLevel, LanguageEnvironment, ValidationIssue, ValidationReport,

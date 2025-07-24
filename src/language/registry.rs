@@ -119,6 +119,9 @@ impl LanguageRegistry {
         let rust_plugin = Arc::new(super::rust::RustLanguagePlugin::new());
         self.register_plugin(rust_plugin)?;
 
+        let docker_plugin = Arc::new(super::docker::DockerLanguagePlugin::new());
+        self.register_plugin(docker_plugin)?;
+
         Ok(())
     }
 
