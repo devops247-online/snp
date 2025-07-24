@@ -122,6 +122,9 @@ impl LanguageRegistry {
         let docker_plugin = Arc::new(super::docker::DockerLanguagePlugin::new());
         self.register_plugin(docker_plugin)?;
 
+        let golang_plugin = Arc::new(super::golang::GoLanguagePlugin::new());
+        self.register_plugin(golang_plugin)?;
+
         Ok(())
     }
 

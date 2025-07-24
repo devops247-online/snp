@@ -6,6 +6,7 @@ pub mod dependency;
 pub mod docker;
 pub mod environment;
 pub mod executor;
+pub mod golang;
 pub mod nodejs;
 pub mod python;
 pub mod registry;
@@ -25,6 +26,7 @@ pub use environment::{
     IsolationLevel, LanguageEnvironment, ValidationIssue, ValidationReport,
 };
 pub use executor::{ExecutionCache, LanguageHookExecutor};
+pub use golang::GoLanguagePlugin;
 pub use nodejs::NodejsLanguagePlugin;
 pub use python::PythonLanguagePlugin;
 pub use registry::{LanguageRegistry, PluginMetadata};
