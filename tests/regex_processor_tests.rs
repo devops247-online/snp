@@ -551,11 +551,11 @@ mod benchmark_tests {
         }
         let duration = start.elapsed();
 
-        // Should compile patterns at < 50ms per pattern on average (more realistic)
+        // Should compile patterns at < 100ms per pattern on average (CI-friendly threshold)
         let avg_time_per_pattern = duration.as_millis() as f64 / patterns.len() as f64;
         assert!(
-            avg_time_per_pattern < 50.0,
-            "Average compilation time {avg_time_per_pattern} ms should be < 50ms"
+            avg_time_per_pattern < 100.0,
+            "Average compilation time {avg_time_per_pattern} ms should be < 100ms"
         );
     }
 
@@ -606,11 +606,11 @@ mod benchmark_tests {
             "Cache hit rate should be > 90%"
         );
 
-        // Cache hits should be very fast
+        // Cache hits should be fast (increased threshold for CI variability)
         let avg_time_per_hit = duration.as_nanos() as f64 / (patterns.len() * 10) as f64;
         assert!(
-            avg_time_per_hit < 1_000.0,
-            "Average cache hit time {avg_time_per_hit} ns should be < 1μs"
+            avg_time_per_hit < 5_000.0,
+            "Average cache hit time {avg_time_per_hit} ns should be < 5μs"
         );
     }
 }
