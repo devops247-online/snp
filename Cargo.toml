@@ -102,7 +102,7 @@ is-terminal = "0.4"
 
 # File locking and monitoring
 fs2 = "0.4"
-notify = "6.1"
+notify = "8.1"
 filetime = "0.2"
 
 # Date and time handling
