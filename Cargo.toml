@@ -124,7 +124,7 @@ once_cell = "1.19"
 
 # Platform-specific process management
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.27", features = ["process", "signal", "fs"] }
+nix = { version = "0.30", features = ["process", "signal", "fs"] }
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
