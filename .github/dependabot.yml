@@ -3,13 +3,12 @@
 
 version: 2
 updates:
-  # Rust/Cargo dependencies
+  # Rust/Cargo dependencies - consolidated configuration
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
+      interval: "daily"  # Check daily for both security and regular updates
+      time: "06:00"
       timezone: "UTC"
     # Group related updates together to reduce PR volume
     groups:
@@ -86,23 +85,6 @@ updates:
     allow:
       - dependency-type: "direct"
       - dependency-type: "indirect"
-    # Security updates get daily checks
-  - package-ecosystem: "cargo"
-    directory: "/"
-    schedule:
-      interval: "daily"
-      time: "06:00"
-      timezone: "UTC"
-    # Only security updates in this configuration
-    groups:
-      daily-security:
-        applies-to: security-updates
-        patterns:
-          - "*"
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "security"
-      include: "scope"
 
   # GitHub Actions workflow dependencies
   - package-ecosystem: "github-actions"
