@@ -588,10 +588,10 @@ impl StaleLockDetector {
     }
 
     pub fn is_process_alive(&self, pid: u32) -> bool {
-        use sysinfo::{Pid, System};
+        use sysinfo::{Pid, ProcessesToUpdate, System};
 
         let mut system = System::new_all();
-        system.refresh_processes();
+        system.refresh_processes(ProcessesToUpdate::All, true);
 
         system.process(Pid::from(pid as usize)).is_some()
     }
