@@ -80,7 +80,7 @@ encoding_rs = "0.8"
 infer = "0.15"
 
 # Process management
-which = "5.0"
+which = "8.0"
 futures = "0.3"
 dirs = "5.0"          # Home directory discovery for CARGO_HOME/RUSTUP_HOME
 
