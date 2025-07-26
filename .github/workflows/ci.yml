@@ -1,3 +1,7 @@
+# Continuous Integration Pipeline
+# Runs on all PRs including Dependabot dependency updates
+# Provides comprehensive testing required for auto-merge functionality
+
 name: CI
 
 on:
@@ -5,6 +9,7 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 env:
   CARGO_TERM_COLOR: always
@@ -52,6 +57,14 @@ jobs:
     - name: Run integration tests
       run: cargo test --test integration_tests --verbose
 
+    - name: Run security tests (especially important for dependency updates)
+      run: cargo test --test security_tests --verbose
+
+    - name: Run performance tests (with CI-friendly timeouts)
+      run: cargo test --test performance_tests --verbose
+      env:
+        CI: true
+
   build:
     name: Build Release
     runs-on: ${{ matrix.os }}
@@ -92,11 +105,19 @@ jobs:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
 
+    - name: Cache dependencies
+      uses: Swatinem/rust-cache@v2
+
     - name: Install cargo-audit
       run: cargo install cargo-audit
 
     - name: Run security audit
       run: cargo audit
+
+    - name: Check for known vulnerabilities in dependencies
+      run: |
+        echo "Checking for security advisories..."
+        cargo audit --color always || echo "Security audit completed with findings"
 
   coverage:
     name: Code Coverage

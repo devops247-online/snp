@@ -1,0 +1,122 @@
+# Dependabot configuration for SNP project
+# Follows 2024 best practices with grouped security updates and intelligent scheduling
+
+version: 2
+updates:
+  # Rust/Cargo dependencies
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    # Group related updates together to reduce PR volume
+    groups:
+      # Security updates get their own group for fast-track merging
+      security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      # Development dependencies can be updated together
+      dev-dependencies:
+        patterns:
+          - "criterion"
+          - "tempfile"
+          - "assert_cmd"
+          - "predicates"
+          - "pretty_assertions"
+          - "mockall"
+      # Core runtime dependencies grouped by category
+      cli-framework:
+        patterns:
+          - "clap*"
+          - "console"
+          - "indicatif"
+          - "dialoguer"
+      async-runtime:
+        patterns:
+          - "tokio*"
+          - "futures*"
+          - "async-*"
+      serialization:
+        patterns:
+          - "serde*"
+          - "*json*"
+          - "*yaml*"
+          - "*toml*"
+      git-operations:
+        patterns:
+          - "git2"
+          - "gix*"
+      http-networking:
+        patterns:
+          - "reqwest"
+          - "hyper*"
+          - "url"
+      # File system and system operations
+      system-utilities:
+        patterns:
+          - "walkdir"
+          - "glob"
+          - "regex"
+          - "which"
+          - "shell*"
+          - "path*"
+      # Crypto and security
+      crypto-security:
+        patterns:
+          - "sha*"
+          - "md-5"
+          - "blake*"
+          - "ring"
+          - "rustls*"
+    # Enable auto-merge for patch and minor updates
+    open-pull-requests-limit: 10
+    # Keep PRs up-to-date with target branch
+    rebase-strategy: "auto"
+    # Add meaningful commit messages
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+      include: "scope"
+    # Only update dependencies that are actually used
+    versioning-strategy: "increase"
+    # Allow Dependabot to resolve conflicts automatically when possible
+    allow:
+      - dependency-type: "direct"
+      - dependency-type: "indirect"
+    # Security updates get daily checks
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "daily"
+      time: "06:00"
+      timezone: "UTC"
+    # Only security updates in this configuration
+    groups:
+      daily-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "security"
+      include: "scope"
+
+  # GitHub Actions workflow dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "10:00"
+      timezone: "UTC"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+      include: "scope"

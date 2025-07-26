@@ -1,0 +1,193 @@
+name: Dependabot Auto-Merge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# Ensure proper permissions for auto-merge functionality
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  dependabot-auto-merge:
+    name: Auto-merge Dependabot PRs
+    runs-on: ubuntu-latest
+    # Only run on Dependabot PRs to avoid unnecessary executions
+    if: github.actor == 'dependabot[bot]'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        # Fetch full history for proper diff analysis
+        fetch-depth: 0
+
+    - name: Fetch Dependabot metadata
+      id: metadata
+      uses: dependabot/fetch-metadata@v2
+      with:
+        github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache dependencies
+      uses: Swatinem/rust-cache@v2
+
+    - name: Security check - Run cargo audit
+      run: |
+        cargo install cargo-audit
+        cargo audit
+      continue-on-error: false
+
+    - name: Format check
+      run: cargo fmt --all -- --check
+
+    - name: Lint check
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Build check
+      run: cargo build --release --verbose
+
+    - name: Run comprehensive tests
+      run: |
+        # Run all test suites to ensure dependency updates don't break functionality
+        cargo test --verbose
+
+        # Run specific test suites that are critical for dependency changes
+        cargo test --test integration_tests --verbose
+        cargo test --test security_tests --verbose
+        cargo test --test performance_tests --verbose
+
+    - name: Check update type and decide merge strategy
+      id: merge-decision
+      run: |
+        echo "Update type: ${{ steps.metadata.outputs.update-type }}"
+        echo "Dependency names: ${{ steps.metadata.outputs.dependency-names }}"
+
+        # Define merge strategy based on update type and dependency
+        if [[ "${{ steps.metadata.outputs.update-type }}" == "version-update:semver-patch" ]] || \
+           [[ "${{ steps.metadata.outputs.update-type }}" == "version-update:semver-minor" ]]; then
+          echo "auto-merge=true" >> $GITHUB_OUTPUT
+          echo "Auto-merge approved for patch/minor update"
+        elif [[ "${{ github.event.pull_request.labels[*] }}" == *"security"* ]]; then
+          echo "auto-merge=true" >> $GITHUB_OUTPUT
+          echo "Auto-merge approved for security update"
+        else
+          echo "auto-merge=false" >> $GITHUB_OUTPUT
+          echo "Manual review required for major version update"
+        fi
+
+    - name: Auto-approve patch and minor updates
+      if: steps.merge-decision.outputs.auto-merge == 'true'
+      run: |
+        gh pr review --approve "$PR_URL" --body "✅ Auto-approved by Dependabot workflow after successful tests
+
+        **Update Type:** ${{ steps.metadata.outputs.update-type }}
+        **Dependencies:** ${{ steps.metadata.outputs.dependency-names }}
+
+        All security checks, tests, and builds have passed successfully."
+      env:
+        PR_URL: ${{ github.event.pull_request.html_url }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Enable auto-merge for approved updates
+      if: steps.merge-decision.outputs.auto-merge == 'true'
+      run: |
+        gh pr merge --auto --squash "$PR_URL"
+        echo "✅ Auto-merge enabled for PR: $PR_URL"
+      env:
+        PR_URL: ${{ github.event.pull_request.html_url }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Comment on manual review required
+      if: steps.merge-decision.outputs.auto-merge == 'false'
+      run: |
+        gh pr comment "$PR_URL" --body "🔍 **Manual Review Required**
+
+        This PR contains major version updates that require manual review:
+
+        **Update Type:** ${{ steps.metadata.outputs.update-type }}
+        **Dependencies:** ${{ steps.metadata.outputs.dependency-names }}
+
+        All automated tests have passed, but please review the changes for potential breaking changes before merging.
+
+        ✅ Security audit: Passed
+        ✅ Format check: Passed
+        ✅ Lint check: Passed
+        ✅ Build check: Passed
+        ✅ Test suite: Passed"
+      env:
+        PR_URL: ${{ github.event.pull_request.html_url }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Notify on failure
+      if: failure()
+      run: |
+        gh pr comment "$PR_URL" --body "❌ **Auto-merge Failed**
+
+        The Dependabot PR failed automated checks and cannot be auto-merged:
+
+        **Update Type:** ${{ steps.metadata.outputs.update-type }}
+        **Dependencies:** ${{ steps.metadata.outputs.dependency-names }}
+
+        Please review the workflow logs and fix any issues before attempting to merge.
+
+        [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+      env:
+        PR_URL: ${{ github.event.pull_request.html_url }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Separate job to handle security-only updates with even more permissive auto-merge
+  security-fast-track:
+    name: Security Fast-Track Merge
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]' && contains(github.event.pull_request.labels.*.name, 'security')
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Fetch Dependabot metadata
+      id: metadata
+      uses: dependabot/fetch-metadata@v2
+      with:
+        github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache dependencies
+      uses: Swatinem/rust-cache@v2
+
+    - name: Quick security and build validation
+      run: |
+        # For security updates, run minimal but essential checks
+        cargo check --release
+        cargo test --test security_tests
+
+        # Install and run cargo audit to verify security fix
+        cargo install cargo-audit
+        cargo audit
+
+    - name: Auto-approve and merge security updates
+      run: |
+        gh pr review --approve "$PR_URL" --body "🚨 **Security Update - Fast-Track Approved**
+
+        This security update has been automatically approved and will be merged immediately after basic validation.
+
+        **Dependencies:** ${{ steps.metadata.outputs.dependency-names }}
+        **Update Type:** ${{ steps.metadata.outputs.update-type }}
+
+        ✅ Security audit: Passed
+        ✅ Build check: Passed
+        ✅ Security tests: Passed"
+
+        gh pr merge --auto --squash "$PR_URL"
+      env:
+        PR_URL: ${{ github.event.pull_request.html_url }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
