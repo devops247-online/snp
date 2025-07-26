@@ -1104,6 +1104,7 @@ impl HookChainExecutor {
                         let result = HookExecutionResult {
                             hook_id: hook.hook.id.clone(),
                             success: false,
+                            skipped: false,
                             exit_code: None,
                             duration: timeout,
                             files_processed: Vec::new(),
@@ -1133,6 +1134,7 @@ impl HookChainExecutor {
             let result = HookExecutionResult {
                 hook_id: hook.hook.id.clone(),
                 success,
+                skipped: false,
                 exit_code: if success { Some(0) } else { Some(1) },
                 duration: duration.max(minimum_duration),
                 files_processed: Vec::new(),

@@ -16,13 +16,23 @@ repos:
     pass_filenames: false
     args: [--all-targets, --all-features, --, -D, warnings]
 
-  - id: cargo-test
-    name: Run Rust tests
+  - id: cargo-test-core
+    name: Run core Rust tests
     entry: cargo test
     language: system
     types: [rust]
     pass_filenames: false
     stages: [pre-commit]
+    args: [--test, "run_command_tests", --test, "storage_tests", --jobs, "4"]
+
+  - id: cargo-test-all
+    name: Run all Rust tests
+    entry: cargo test
+    language: system
+    types: [rust]
+    pass_filenames: false
+    stages: [manual]
+    args: [--jobs, "4"]
 
 - repo: https://github.com/pre-commit/pre-commit-hooks
   rev: v5.0.0

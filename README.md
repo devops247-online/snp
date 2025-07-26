@@ -86,7 +86,7 @@ SNP is a **feature-complete** pre-commit framework with advanced capabilities:
 - **Hook Chaining**: Dependency management and execution ordering
 - **API Integration**: Real GitHub/GitLab API calls for version updates
 - **Configuration Migration**: Seamless migration from Python pre-commit
-- **Output Aggregation**: Comprehensive result formatting and reporting  
+- **Output Aggregation**: Comprehensive result formatting and reporting
 - **Concurrent Processing**: File locking and parallel execution support
 - **Environment Management**: Language-specific environment setup and caching
 

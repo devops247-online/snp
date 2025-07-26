@@ -116,6 +116,12 @@ impl LanguageRegistry {
         let system_plugin = Arc::new(super::system::SystemLanguagePlugin::new());
         self.register_plugin(system_plugin)?;
 
+        let python_plugin = Arc::new(super::python::PythonLanguagePlugin::new());
+        self.register_plugin(python_plugin)?;
+
+        let nodejs_plugin = Arc::new(super::nodejs::NodejsLanguagePlugin::new());
+        self.register_plugin(nodejs_plugin)?;
+
         let rust_plugin = Arc::new(super::rust::RustLanguagePlugin::new());
         self.register_plugin(rust_plugin)?;
 

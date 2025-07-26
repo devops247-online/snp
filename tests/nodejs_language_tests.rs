@@ -26,6 +26,8 @@ async fn test_nodejs_environment_creation() {
         cache_strategy: CacheStrategy::Both,
         working_directory: None,
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     // Test Node.js environment creation
@@ -118,6 +120,8 @@ async fn test_nodejs_version_detection_and_compatibility() {
         cache_strategy: CacheStrategy::Memory,
         working_directory: None,
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     let suitable_node = plugin.find_suitable_node(&config).await;
@@ -245,6 +249,8 @@ async fn test_dependency_installation() {
         cache_strategy: CacheStrategy::Memory,
         working_directory: Some(project_path.to_path_buf()),
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     let env = plugin.setup_environment(&config).await;
@@ -294,6 +300,8 @@ async fn test_nodejs_hook_execution() {
         cache_strategy: CacheStrategy::Memory,
         working_directory: None,
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     let env_result = plugin.setup_environment(&config).await;
@@ -452,6 +460,8 @@ async fn test_command_construction() {
         cache_strategy: CacheStrategy::Memory,
         working_directory: None,
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     let env_result = plugin.setup_environment(&config).await;
@@ -583,6 +593,8 @@ async fn test_error_handling_and_recovery() {
         cache_strategy: CacheStrategy::Memory,
         working_directory: None,
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     let result = plugin.setup_environment(&config).await;

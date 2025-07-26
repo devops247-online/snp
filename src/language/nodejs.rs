@@ -908,6 +908,7 @@ impl NodejsLanguagePlugin {
         Ok(HookExecutionResult {
             hook_id: "node".to_string(), // Will be overridden by caller
             success: output.status.success(),
+            skipped: false,
             exit_code: output.status.code(),
             duration,
             files_processed: vec![], // Will be set by caller

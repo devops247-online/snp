@@ -297,7 +297,7 @@ impl CleanupManager {
         }
     }
 
-    /// Clean environments based on age and configuration  
+    /// Clean environments based on age and configuration
     async fn clean_environments(&self, config: &CleanConfig) -> Result<usize> {
         if config.dry_run {
             // In dry run mode, just count what would be cleaned

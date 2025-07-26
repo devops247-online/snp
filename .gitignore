@@ -25,3 +25,6 @@ coverage/
 
 # SNP specific
 .snp-cache/
+.claude
+CLAUDE.md
+external-repo

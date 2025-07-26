@@ -243,6 +243,7 @@ async fn test_plugin_extensibility() {
             Ok(snp::execution::HookExecutionResult {
                 hook_id: hook.id.clone(),
                 success: true,
+                skipped: false,
                 exit_code: Some(0),
                 stdout: "Custom plugin execution".to_string(),
                 stderr: String::new(),

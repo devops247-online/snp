@@ -21,6 +21,7 @@ pub mod output;
 pub mod process;
 pub mod regex_processor;
 pub mod storage;
+pub mod user_output;
 pub mod validation;
 
 // Re-export main types for easier access

@@ -222,6 +222,8 @@ async fn test_ruby_environment_setup() {
         isolation_level: IsolationLevel::Complete,
         working_directory: None,
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     let env = plugin.setup_environment(&env_config).await.unwrap();
@@ -290,6 +292,8 @@ end
         isolation_level: IsolationLevel::Complete,
         working_directory: Some(project_path.to_path_buf()),
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     let env = plugin.setup_environment(&env_config).await.unwrap();
@@ -338,6 +342,8 @@ end
         isolation_level: IsolationLevel::Complete,
         working_directory: Some(project_path.to_path_buf()),
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     let env = plugin.setup_environment(&env_config).await.unwrap();
@@ -400,6 +406,8 @@ end
         isolation_level: IsolationLevel::Complete,
         working_directory: Some(project_path.to_path_buf()),
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     let env = plugin.setup_environment(&env_config).await.unwrap();
@@ -517,6 +525,8 @@ async fn test_bundler_environment_isolation() {
         isolation_level: IsolationLevel::Complete,
         working_directory: Some(project_path.to_path_buf()),
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     if let Ok(env) = plugin.setup_environment(&env_config).await {

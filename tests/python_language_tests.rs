@@ -23,6 +23,8 @@ async fn test_python_environment_creation() {
         cache_strategy: CacheStrategy::Both,
         working_directory: None,
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     // Test virtual environment creation
@@ -116,6 +118,8 @@ async fn test_python_version_detection_and_compatibility() {
         cache_strategy: CacheStrategy::Both,
         working_directory: None,
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     let result = plugin.setup_environment(&config).await;
@@ -145,6 +149,8 @@ async fn test_pip_dependency_management() {
         cache_strategy: CacheStrategy::Both,
         working_directory: None,
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     // Create environment
@@ -190,6 +196,8 @@ async fn test_python_hook_execution() {
         cache_strategy: CacheStrategy::Both,
         working_directory: None,
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     // Create environment
@@ -265,6 +273,8 @@ async fn test_performance_optimization() {
         cache_strategy: CacheStrategy::Both,
         working_directory: None,
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     // Test environment caching - first creation
@@ -312,6 +322,8 @@ async fn test_error_handling_and_recovery() {
         cache_strategy: CacheStrategy::Both,
         working_directory: None,
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     let result = plugin.setup_environment(&config).await;
@@ -346,6 +358,8 @@ async fn test_error_handling_and_recovery() {
         cache_strategy: CacheStrategy::Both,
         working_directory: None,
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     let env = plugin.setup_environment(&config).await;
@@ -412,6 +426,8 @@ async fn test_cross_platform_compatibility() {
         cache_strategy: CacheStrategy::Both,
         working_directory: None,
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     let env = plugin.setup_environment(&config).await;

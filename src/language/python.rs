@@ -776,6 +776,281 @@ impl PythonLanguagePlugin {
             })
         }
     }
+
+    /// Install a repository as a Python package in the virtual environment
+    async fn install_repository(&self, env_path: &Path, repo_path: &Path) -> Result<()> {
+        tracing::debug!(
+            "Installing repository {:?} in environment {:?}",
+            repo_path,
+            env_path
+        );
+
+        // Get pip executable from virtual environment
+        let pip_executable = env_path.join("bin").join("pip");
+        if !pip_executable.exists() {
+            return Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
+                language: "python".to_string(),
+                error: "pip not found in virtual environment".to_string(),
+                recovery_suggestion: Some(
+                    "Ensure virtual environment was created correctly".to_string(),
+                ),
+            }));
+        }
+
+        // Check if repository is already installed and up-to-date
+        if self
+            .is_repository_installed(&pip_executable, repo_path)
+            .await?
+        {
+            tracing::debug!("Repository already installed and up-to-date, skipping installation");
+            return Ok(());
+        }
+
+        // Install repository in editable mode
+        tracing::debug!("Running pip install for repository: {:?}", repo_path);
+        let output = TokioCommand::new(&pip_executable)
+            .args([
+                "install", "-e", // Editable install
+                ".",  // Install current directory
+            ])
+            .current_dir(repo_path) // Run in repository directory
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await?;
+
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            tracing::debug!("Repository installation successful: {}", stdout);
+
+            // Mark installation timestamp for future checks
+            self.mark_repository_installed(env_path, repo_path).await?;
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            tracing::error!("Repository installation failed: {}", stderr);
+            tracing::debug!("Pip stdout: {}", stdout);
+
+            Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
+                language: "python".to_string(),
+                error: format!("Failed to install repository: {stderr}"),
+                recovery_suggestion: Some(
+                    "Check repository contains setup.py or pyproject.toml".to_string(),
+                ),
+            }))
+        }
+    }
+
+    /// Check if a repository is already installed and up-to-date
+    async fn is_repository_installed(
+        &self,
+        pip_executable: &Path,
+        repo_path: &Path,
+    ) -> Result<bool> {
+        // First, check if there's a setup.py or pyproject.toml in the repo to get package name
+        let package_name = self.get_package_name_from_repository(repo_path).await?;
+
+        // Check if package is installed using pip list
+        let list_output = TokioCommand::new(pip_executable)
+            .args(["list", "--format=json"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await?;
+
+        if !list_output.status.success() {
+            tracing::debug!("Failed to get pip list, assuming not installed");
+            return Ok(false);
+        }
+
+        let list_output_str = String::from_utf8_lossy(&list_output.stdout);
+
+        // Check if package is in the pip list output (simple string search)
+        let is_installed = list_output_str.lines().any(|line| {
+            if let Some(name_start) = line.find("\"name\": \"") {
+                let name_part = &line[name_start + 9..];
+                if let Some(name_end) = name_part.find('"') {
+                    let name = &name_part[..name_end];
+                    return name.to_lowercase() == package_name.to_lowercase();
+                }
+            }
+            false
+        });
+
+        if !is_installed {
+            tracing::debug!("Package {} not found in pip list", package_name);
+            return Ok(false);
+        }
+
+        // Package is installed, now check if repository files have been modified
+        let install_marker_path = pip_executable
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join(".snp_installs")
+            .join(format!("{package_name}.marker"));
+
+        if !install_marker_path.exists() {
+            tracing::debug!(
+                "No install marker found for {}, needs installation",
+                package_name
+            );
+            return Ok(false);
+        }
+
+        // Check if repository files are newer than install marker
+        let install_time = match std::fs::metadata(&install_marker_path) {
+            Ok(metadata) => metadata
+                .modified()
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH),
+            Err(_) => return Ok(false),
+        };
+
+        let repo_modified_time = self.get_repository_modified_time(repo_path).await?;
+
+        if repo_modified_time > install_time {
+            tracing::debug!("Repository files newer than install marker, needs reinstallation");
+            return Ok(false);
+        }
+
+        tracing::debug!("Repository {} is up-to-date", package_name);
+        Ok(true)
+    }
+
+    /// Get package name from repository setup.py or pyproject.toml
+    async fn get_package_name_from_repository(&self, repo_path: &Path) -> Result<String> {
+        // Try pyproject.toml first
+        let pyproject_path = repo_path.join("pyproject.toml");
+        if pyproject_path.exists() {
+            if let Ok(content) = fs::read_to_string(&pyproject_path).await {
+                // Simple parsing - look for name = "package-name" in [project] section
+                for line in content.lines() {
+                    let line = line.trim();
+                    if line.starts_with("name") && line.contains('=') {
+                        if let Some(name_part) = line.split('=').nth(1) {
+                            let name = name_part.trim().trim_matches('"').trim_matches('\'');
+                            if !name.is_empty() {
+                                return Ok(name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Try setup.py
+        let setup_py_path = repo_path.join("setup.py");
+        if setup_py_path.exists() {
+            if let Ok(content) = fs::read_to_string(&setup_py_path).await {
+                // Simple parsing - look for name="package-name" or name='package-name'
+                for line in content.lines() {
+                    let line = line.trim();
+                    if line.contains("name") && line.contains('=') {
+                        // Extract name from setup(name="package-name", ...)
+                        if let Some(start) = line.find("name") {
+                            let after_name = &line[start..];
+                            if let Some(eq_pos) = after_name.find('=') {
+                                let after_eq = &after_name[eq_pos + 1..].trim();
+                                if let Some(quote_start) =
+                                    after_eq.find('"').or_else(|| after_eq.find('\''))
+                                {
+                                    let quote_char = after_eq.chars().nth(quote_start).unwrap();
+                                    let quoted_part = &after_eq[quote_start + 1..];
+                                    if let Some(quote_end) = quoted_part.find(quote_char) {
+                                        let name = &quoted_part[..quote_end];
+                                        if !name.is_empty() {
+                                            return Ok(name.to_string());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: use directory name
+        Ok(repo_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string())
+    }
+
+    /// Get the most recent modification time of important files in the repository
+    async fn get_repository_modified_time(
+        &self,
+        repo_path: &Path,
+    ) -> Result<std::time::SystemTime> {
+        let mut latest_time = std::time::SystemTime::UNIX_EPOCH;
+
+        // Check important files for modifications
+        let important_files = [
+            "setup.py",
+            "pyproject.toml",
+            "setup.cfg",
+            "requirements.txt",
+            "Pipfile",
+            "poetry.lock",
+        ];
+
+        for file in &important_files {
+            let file_path = repo_path.join(file);
+            if file_path.exists() {
+                if let Ok(metadata) = std::fs::metadata(&file_path) {
+                    if let Ok(modified) = metadata.modified() {
+                        if modified > latest_time {
+                            latest_time = modified;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Also check source directories
+        let src_dirs = [
+            "src",
+            repo_path
+                .file_name()
+                .unwrap_or_default()
+                .to_str()
+                .unwrap_or(""),
+        ];
+        for src_dir in &src_dirs {
+            let src_path = repo_path.join(src_dir);
+            if src_path.exists() && src_path.is_dir() {
+                if let Ok(metadata) = std::fs::metadata(&src_path) {
+                    if let Ok(modified) = metadata.modified() {
+                        if modified > latest_time {
+                            latest_time = modified;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(latest_time)
+    }
+
+    /// Mark repository as installed by creating a marker file
+    async fn mark_repository_installed(&self, env_path: &Path, repo_path: &Path) -> Result<()> {
+        let package_name = self.get_package_name_from_repository(repo_path).await?;
+        let marker_dir = env_path.join(".snp_installs");
+        fs::create_dir_all(&marker_dir).await?;
+
+        let marker_path = marker_dir.join(format!("{package_name}.marker"));
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        fs::write(&marker_path, format!("Installed at: {timestamp}")).await?;
+
+        tracing::debug!("Created install marker at: {:?}", marker_path);
+        Ok(())
+    }
 }
 
 impl Default for PythonLanguageConfig {
@@ -940,6 +1215,51 @@ impl PythonDependencyManager {
         // This is a simplified version extraction - can be enhanced
         Ok("unknown".to_string())
     }
+
+    /// Create a Python virtual environment in the specified directory
+    #[allow(dead_code)]
+    async fn create_python_venv(&self, python_info: &PythonInfo, env_path: &Path) -> Result<()> {
+        // If environment already exists and is valid, return success
+        if env_path.exists() && self.is_valid_environment(env_path).await.unwrap_or(false) {
+            return Ok(());
+        }
+
+        // Remove existing directory if it exists but is invalid
+        if env_path.exists() {
+            std::fs::remove_dir_all(env_path)?;
+        }
+
+        // Create the virtual environment using python -m venv
+        let output = TokioCommand::new(&python_info.executable_path)
+            .args(["-m", "venv", env_path.to_str().unwrap()])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
+                language: "python".to_string(),
+                error: format!("Failed to create virtual environment: {stderr}"),
+                recovery_suggestion: Some("Ensure python3-venv is installed".to_string()),
+            }));
+        }
+
+        Ok(())
+    }
+
+    /// Check if a Python environment is valid
+    #[allow(dead_code)]
+    async fn is_valid_environment(&self, env_path: &Path) -> Result<bool> {
+        let python_exe = if cfg!(windows) {
+            env_path.join("Scripts").join("python.exe")
+        } else {
+            env_path.join("bin").join("python")
+        };
+
+        Ok(python_exe.exists())
+    }
 }
 
 #[async_trait]
@@ -967,20 +1287,79 @@ impl Language for PythonLanguagePlugin {
             .find_suitable_python(config.language_version.as_deref().unwrap_or("python3"))
             .await?;
 
-        // Create virtual environment
-        let env_path = self.setup_python_environment(&python_info, config).await?;
-
         // Generate environment ID
         let environment_id = self.generate_environment_id(&python_info, config);
 
+        // Use a default cache directory if not specified (this should be provided by the environment manager)
+        let cache_root = std::env::var("SNP_HOME")
+            .or_else(|_| std::env::var("XDG_CACHE_HOME").map(|p| format!("{p}/snp")))
+            .unwrap_or_else(|_| {
+                format!("{}/.cache/snp", std::env::var("HOME").unwrap_or_default())
+            });
+        let env_path = PathBuf::from(cache_root)
+            .join("environments")
+            .join(&environment_id);
+
+        // Ensure the environment directory exists
+        std::fs::create_dir_all(&env_path)?;
+
+        // Create virtual environment in the directory
+        let python_exe = env_path.join("bin").join("python");
+        tracing::debug!("Checking for Python executable at: {:?}", python_exe);
+        if !python_exe.exists() {
+            tracing::debug!("Creating Python virtual environment at: {:?}", env_path);
+            tracing::debug!(
+                "Using Python interpreter: {:?}",
+                python_info.executable_path
+            );
+            let output = TokioCommand::new(&python_info.executable_path)
+                .args(["-m", "venv", env_path.to_str().unwrap()])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()
+                .await?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                tracing::error!("Virtual environment creation failed: {}", stderr);
+                return Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
+                    language: "python".to_string(),
+                    error: format!("Failed to create virtual environment: {stderr}"),
+                    recovery_suggestion: Some("Ensure python3-venv is installed".to_string()),
+                }));
+            } else {
+                tracing::debug!("Virtual environment created successfully");
+            }
+        } else {
+            tracing::debug!("Python executable already exists, skipping venv creation");
+        }
+
         // Get Python executable
+        tracing::debug!("Getting Python executable from environment: {:?}", env_path);
         let python_exe = self.get_python_executable(&env_path)?;
+        tracing::debug!("Found Python executable: {:?}", python_exe);
 
         // Get environment variables
+        tracing::debug!("Getting environment variables for: {:?}", env_path);
         let environment_variables = self.get_python_environment_variables(&env_path)?;
+        tracing::debug!("Got {} environment variables", environment_variables.len());
+
+        // Install repository if specified
+        if let Some(ref repo_path) = config.repository_path {
+            tracing::debug!("Installing repository from path: {:?}", repo_path);
+            self.install_repository(&env_path, repo_path).await?;
+        }
 
         // Install additional dependencies if specified
+        tracing::debug!(
+            "Checking for additional dependencies: {:?}",
+            config.additional_dependencies
+        );
         let installed_dependencies = if !config.additional_dependencies.is_empty() {
+            tracing::debug!(
+                "Installing {} additional dependencies",
+                config.additional_dependencies.len()
+            );
             let deps = self
                 .resolve_dependencies(&config.additional_dependencies)
                 .await?;
@@ -990,6 +1369,7 @@ impl Language for PythonLanguagePlugin {
                 .await?;
             deps
         } else {
+            tracing::debug!("No additional dependencies to install");
             Vec::new()
         };
 
@@ -1039,7 +1419,17 @@ impl Language for PythonLanguagePlugin {
         env: &LanguageEnvironment,
         files: &[PathBuf],
     ) -> Result<HookExecutionResult> {
+        tracing::debug!("Python plugin execute_hook called for hook: {}", hook.id);
+        tracing::debug!("Environment root_path: {:?}", env.root_path);
+        tracing::debug!("Environment executable_path: {:?}", env.executable_path);
+
         let command = self.build_command(hook, env, files)?;
+        tracing::debug!(
+            "Built command: executable={:?}, args={:?}",
+            command.executable,
+            command.arguments
+        );
+
         let start_time = Instant::now();
 
         // Build tokio command
@@ -1054,6 +1444,8 @@ impl Language for PythonLanguagePlugin {
         tokio_cmd.stdout(Stdio::piped());
         tokio_cmd.stderr(Stdio::piped());
 
+        tracing::debug!("About to execute command for hook: {}", hook.id);
+
         // Execute with timeout
         let output = if let Some(timeout) = command.timeout {
             match tokio::time::timeout(timeout, tokio_cmd.output()).await {
@@ -1062,6 +1454,7 @@ impl Language for PythonLanguagePlugin {
                     return Ok(HookExecutionResult {
                         hook_id: hook.id.clone(),
                         success: false,
+                        skipped: false,
                         exit_code: Some(-1),
                         duration: start_time.elapsed(),
                         files_processed: files.to_vec(),
@@ -1081,11 +1474,15 @@ impl Language for PythonLanguagePlugin {
             tokio_cmd.output().await?
         };
 
+        tracing::debug!("Command execution completed for hook: {}", hook.id);
+        tracing::debug!("Command exit status: {:?}", output.status);
+
         let duration = start_time.elapsed();
 
         Ok(HookExecutionResult {
             hook_id: hook.id.clone(),
             success: output.status.success(),
+            skipped: false,
             exit_code: output.status.code(),
             duration,
             files_processed: files.to_vec(),
@@ -1111,15 +1508,23 @@ impl Language for PythonLanguagePlugin {
         env: &LanguageEnvironment,
         files: &[PathBuf],
     ) -> Result<Command> {
+        tracing::debug!(
+            "Building command for hook: {}, entry: {}",
+            hook.id,
+            hook.entry
+        );
         let python_exe = self.get_python_executable(&env.root_path)?;
+        tracing::debug!("Python executable: {:?}", python_exe);
         let mut command = Command::new(python_exe.to_string_lossy());
 
         // Handle different entry types
         if hook.entry == "python" {
             // Direct Python command - use arguments as-is
+            tracing::debug!("Using direct Python command path");
             command.args(&hook.args);
         } else if hook.entry.starts_with("python -m") {
             // Module execution
+            tracing::debug!("Using Python module execution path");
             let module_parts: Vec<&str> = hook.entry.split_whitespace().collect();
             if module_parts.len() >= 3 {
                 command.arg("-m").arg(module_parts[2]);
@@ -1127,7 +1532,26 @@ impl Language for PythonLanguagePlugin {
             command.args(&hook.args);
         } else {
             // Assume it's a script or command available in the environment
-            command = Command::new(&hook.entry);
+            tracing::debug!(
+                "Using script/command execution path - looking for: {}",
+                hook.entry
+            );
+
+            // Try to find the executable in the virtual environment first
+            let venv_bin_path = env.root_path.join("bin").join(&hook.entry);
+            let executable_path = if venv_bin_path.exists() {
+                tracing::debug!("Found executable in venv: {:?}", venv_bin_path);
+                venv_bin_path
+            } else {
+                // Fall back to original entry
+                tracing::debug!(
+                    "Executable not found in venv, using original entry: {}",
+                    hook.entry
+                );
+                PathBuf::from(&hook.entry)
+            };
+
+            command = Command::new(executable_path.to_string_lossy());
             command.args(&hook.args);
         }
 
@@ -1143,9 +1567,14 @@ impl Language for PythonLanguagePlugin {
             command.env(key, value);
         }
 
-        // Set working directory
-        if let Some(parent) = env.root_path.parent() {
-            command.current_dir(parent);
+        // Set working directory - use the project working directory from environment
+        if let Some(working_dir_str) = env.environment_variables.get("SNP_WORKING_DIRECTORY") {
+            let working_dir = PathBuf::from(working_dir_str);
+            tracing::debug!("Setting working directory to: {}", working_dir.display());
+            command.current_dir(working_dir);
+        } else {
+            // Fallback to current directory if not set
+            tracing::debug!("No working directory set, using current directory");
         }
 
         // Set timeout

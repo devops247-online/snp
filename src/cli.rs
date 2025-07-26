@@ -244,6 +244,11 @@ impl Cli {
     }
 
     async fn run_async(&self) -> Result<i32> {
+        // Create user output handler
+        let user_output_config =
+            crate::user_output::UserOutputConfig::new(self.verbose, self.quiet, self.color.clone());
+        let user_output = crate::user_output::UserOutput::new(user_output_config);
+
         match &self.command {
             Some(Commands::Run {
                 hook,
@@ -280,15 +285,14 @@ impl Cli {
                 }
 
                 // Parse stage
-                let stage = match hook_stage.as_str() {
-                    "pre-commit" | "commit" => Stage::PreCommit,
-                    "pre-push" | "push" => Stage::PrePush,
-                    _ => {
+                let stage = match Stage::from_str(hook_stage) {
+                    Ok(stage) => stage,
+                    Err(_) => {
                         return Err(crate::error::SnpError::Cli(Box::new(
                             crate::error::CliError::InvalidArgument {
                                 argument: "--hook-stage".to_string(),
                                 value: hook_stage.clone(),
-                                suggestion: "Valid stages are: pre-commit, pre-push".to_string(),
+                                suggestion: "Valid stages are: pre-commit, pre-push, commit-msg, prepare-commit-msg, post-commit, post-checkout, post-merge, pre-rebase, post-rewrite, manual, merge-commit".to_string(),
                             },
                         )));
                     }
@@ -305,11 +309,12 @@ impl Cli {
                 let mut execution_config = ExecutionConfig::new(stage)
                     .with_verbose(*verbose || self.verbose)
                     .with_fail_fast(*fail_fast)
-                    .with_hook_timeout(Duration::from_secs(60));
+                    .with_hook_timeout(Duration::from_secs(60))
+                    .with_user_output(user_output.clone());
 
                 // Execute based on command type
                 let execution_result = if let Some(hook_id) = hook {
-                    println!("Running hook: {hook_id}");
+                    user_output.show_status(&format!("Running hook: {hook_id}"));
                     run::execute_run_command_single_hook(
                         &repo_path,
                         &self.config,
@@ -318,20 +323,21 @@ impl Cli {
                     )
                     .await?
                 } else if *all_files {
-                    println!("Running hooks on all files");
+                    user_output.show_status("Running hooks on all files");
                     execution_config = execution_config.with_all_files(true);
                     run::execute_run_command_all_files(&repo_path, &self.config, &execution_config)
                         .await?
                 } else if !files.is_empty() {
-                    println!("Running hooks on {} specific files", files.len());
+                    user_output
+                        .show_status(&format!("Running hooks on {} specific files", files.len()));
                     let file_paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
                     execution_config = execution_config.with_files(file_paths);
                     run::execute_run_command_with_files(&repo_path, &self.config, &execution_config)
                         .await?
                 } else if let (Some(from), Some(to)) = (from_ref, to_ref) {
-                    if self.verbose || *verbose {
-                        println!("Running hooks on files changed between {from} and {to}");
-                    }
+                    user_output.show_status(&format!(
+                        "Running hooks on files changed between {from} and {to}"
+                    ));
                     run::execute_run_command_with_refs(
                         &repo_path,
                         &self.config,
@@ -341,42 +347,16 @@ impl Cli {
                     )
                     .await?
                 } else {
-                    println!("Running hooks on staged files");
+                    user_output.show_status("Running hooks on staged files");
                     run::execute_run_command(&repo_path, &self.config, &execution_config).await?
                 };
 
-                // Report results
+                // Report results using user-friendly output
+                user_output.show_execution_summary(&execution_result);
+
                 if execution_result.success {
-                    if self.verbose || *verbose {
-                        println!(
-                            "All hooks passed! Executed {} hooks in {:.2}s",
-                            execution_result.hooks_executed,
-                            execution_result.total_duration.as_secs_f64()
-                        );
-                    }
                     Ok(0)
                 } else {
-                    if !self.quiet {
-                        eprintln!("Hook execution failed!");
-                        eprintln!(
-                            "Executed: {}, Passed: {}, Failed: {}",
-                            execution_result.hooks_executed,
-                            execution_result.hooks_passed.len(),
-                            execution_result.hooks_failed.len()
-                        );
-
-                        if *verbose || self.verbose {
-                            for failed_hook in &execution_result.hooks_failed {
-                                eprintln!(
-                                    "Failed hook: {} (exit code: {:?})",
-                                    failed_hook.hook_id, failed_hook.exit_code
-                                );
-                                if !failed_hook.stderr.is_empty() {
-                                    eprintln!("  stderr: {}", failed_hook.stderr);
-                                }
-                            }
-                        }
-                    }
                     Ok(1)
                 }
             }
@@ -429,6 +409,9 @@ impl Cli {
                     for warning in &result.warnings {
                         eprintln!("⚠️  {warning}");
                     }
+
+                    // Always print completion message
+                    println!("Hook installation completed");
                 }
 
                 // Install hook environments if requested
@@ -638,7 +621,7 @@ impl Cli {
                     let result = validator.validate_file(path);
 
                     if result.is_valid {
-                        if self.verbose {
+                        if !self.quiet {
                             println!("✓ {filename} is valid");
                         }
                     } else {
@@ -695,20 +678,22 @@ impl Cli {
             }
             _ => {
                 // Default to run command when no subcommand provided
-                if !self.quiet {
-                    println!("Running hooks (default)...");
-                }
+                user_output.show_status("Running hooks (default)...");
+
                 let repo_path = std::env::current_dir().map_err(|e| {
                     crate::error::SnpError::Cli(Box::new(crate::error::CliError::RuntimeError {
                         message: format!("Failed to get current directory: {e}"),
                     }))
                 })?;
 
-                let execution_config =
-                    ExecutionConfig::new(Stage::PreCommit).with_verbose(self.verbose);
+                let execution_config = ExecutionConfig::new(Stage::PreCommit)
+                    .with_verbose(self.verbose)
+                    .with_user_output(user_output.clone());
 
                 let execution_result =
                     run::execute_run_command(&repo_path, &self.config, &execution_config).await?;
+
+                user_output.show_execution_summary(&execution_result);
 
                 if execution_result.success {
                     Ok(0)

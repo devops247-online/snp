@@ -32,6 +32,8 @@ pub struct EnvironmentConfig {
     pub isolation_level: IsolationLevel,
     pub working_directory: Option<PathBuf>,
     pub version: Option<String>, // Alias for language_version for compatibility
+    pub repository_path: Option<PathBuf>, // Path to the hook's repository for installation
+    pub hook_timeout: Option<Duration>, // Timeout for hook execution
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -331,6 +333,8 @@ impl Default for EnvironmentConfig {
             isolation_level: IsolationLevel::Partial,
             working_directory: None,
             version: None,
+            repository_path: None,
+            hook_timeout: None,
         }
     }
 }
@@ -368,6 +372,16 @@ impl EnvironmentConfig {
 
     pub fn with_environment_variables(mut self, env_vars: HashMap<String, String>) -> Self {
         self.environment_variables = env_vars;
+        self
+    }
+
+    pub fn with_repository_path(mut self, path: PathBuf) -> Self {
+        self.repository_path = Some(path);
+        self
+    }
+
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.hook_timeout = Some(timeout);
         self
     }
 }

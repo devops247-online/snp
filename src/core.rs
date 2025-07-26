@@ -21,6 +21,7 @@ pub enum Stage {
     PreRebase,
     PostRewrite,
     Manual,
+    MergeCommit,
 }
 
 impl Stage {
@@ -40,6 +41,7 @@ impl Stage {
             "pre-rebase" => Ok(Stage::PreRebase),
             "post-rewrite" => Ok(Stage::PostRewrite),
             "manual" => Ok(Stage::Manual),
+            "merge-commit" => Ok(Stage::MergeCommit),
             // Legacy aliases
             "commit" => Ok(Stage::PreCommit),
             "push" => Ok(Stage::PrePush),
@@ -68,6 +70,7 @@ impl Stage {
             Stage::PreRebase => "pre-rebase",
             Stage::PostRewrite => "post-rewrite",
             Stage::Manual => "manual",
+            Stage::MergeCommit => "merge-commit",
         }
     }
 
@@ -85,6 +88,7 @@ impl Stage {
             Stage::PreRebase,
             Stage::PostRewrite,
             Stage::Manual,
+            Stage::MergeCommit,
         ]
     }
 }
@@ -409,17 +413,9 @@ impl Hook {
         let stages = if let Some(stage_strings) = &config_hook.stages {
             let mut stages = Vec::new();
             for stage_str in stage_strings {
-                let stage = match stage_str.as_str() {
-                    "pre-commit" | "commit" => Stage::PreCommit,
-                    "pre-push" | "push" => Stage::PrePush,
-                    "pre-merge-commit" => Stage::PreMergeCommit,
-                    "pre-rebase" => Stage::PreRebase,
-                    "post-checkout" => Stage::PostCheckout,
-                    "post-commit" => Stage::PostCommit,
-                    "post-merge" => Stage::PostMerge,
-                    "post-rewrite" => Stage::PostRewrite,
-                    "manual" => Stage::Manual,
-                    _ => {
+                let stage = match Stage::from_str(stage_str) {
+                    Ok(stage) => stage,
+                    Err(_) => {
                         return Err(SnpError::Config(Box::new(ConfigError::InvalidValue {
                             message: format!("Invalid stage: {stage_str}"),
                             field: "stages".to_string(),

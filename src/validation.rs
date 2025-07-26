@@ -299,9 +299,18 @@ impl SchemaValidator {
             );
         }
 
-        // For meta hooks, entry is not required (it's provided by the system)
+        // Entry is required except for:
+        // - External repo hooks (get their entry from the repository's .pre-commit-hooks.yaml)
+        // - Meta hooks (get their entry from the system)
+        let is_external_repo = repo_type
+            .map(|repo| {
+                !repo.is_empty() && repo != "local" && repo != "meta" && self.is_valid_git_url(repo)
+            })
+            .unwrap_or(false);
         let is_meta_hook = repo_type == Some("meta");
-        if hook.entry.is_empty() && !is_meta_hook {
+        let requires_entry = !is_external_repo && !is_meta_hook;
+
+        if hook.entry.is_empty() && requires_entry {
             result.add_error(
                 ValidationError::new(
                     ValidationErrorType::MissingRequiredField,
@@ -707,6 +716,8 @@ impl SchemaValidator {
                 | "post-merge"
                 | "pre-rebase"
                 | "post-rewrite"
+                | "manual"
+                | "merge-commit"
         )
     }
 }
@@ -777,6 +788,7 @@ static SUPPORTED_STAGES: Lazy<HashSet<String>> = Lazy::new(|| {
         "pre-rebase",
         "post-rewrite",
         "manual",
+        "merge-commit",
     ]
     .iter()
     .map(|&s| s.to_string())

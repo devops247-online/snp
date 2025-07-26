@@ -363,6 +363,8 @@ func main() {
         isolation_level: IsolationLevel::Complete,
         working_directory: Some(module_path.to_path_buf()),
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     let env = plugin.setup_environment(&env_config).await.unwrap();
@@ -416,7 +418,7 @@ func main() {
         fmt.Println("No files provided")
         return
     }
-    
+
     for _, file := range os.Args[1:] {
         fmt.Printf("Formatting %s\n", file)
     }
@@ -436,6 +438,8 @@ func main() {
         isolation_level: IsolationLevel::Complete,
         working_directory: Some(module_path.to_path_buf()),
         version: None,
+        repository_path: None,
+        hook_timeout: None,
     };
 
     let env = plugin.setup_environment(&env_config).await.unwrap();

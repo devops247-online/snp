@@ -1,9 +1,11 @@
 // Configuration handling for SNP
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::error::{ConfigError, Result, SnpError};
+use crate::storage::Store;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
@@ -208,6 +210,251 @@ impl Config {
         }
 
         Ok(())
+    }
+
+    /// Load configuration with external repository hooks resolved
+    pub async fn from_file_with_resolved_hooks(path: &PathBuf) -> Result<Self> {
+        let mut config = Self::from_file(path)?;
+        config.resolve_external_hooks().await?;
+        Ok(config)
+    }
+
+    /// Resolve external repository hooks by fetching their definitions
+    async fn resolve_external_hooks(&mut self) -> Result<()> {
+        tracing::debug!("Starting external hook resolution");
+        let store = Arc::new(Store::new().map_err(|e| {
+            tracing::error!("Failed to create store: {}", e);
+            e
+        })?);
+
+        for (i, repo) in self.repos.iter_mut().enumerate() {
+            tracing::debug!("Processing repository {}: {}", i, repo.repo);
+
+            // Skip local and meta repositories
+            if repo.repo == "local" || repo.repo == "meta" {
+                tracing::debug!("Skipping {} repository", repo.repo);
+                continue;
+            }
+
+            // Clone/fetch the external repository
+            tracing::debug!("Cloning repository: {}", repo.repo);
+            let repo_path = store
+                .clone_repository(&repo.repo, repo.rev.as_deref().unwrap_or("HEAD"), &[])
+                .map_err(|e| {
+                    tracing::error!("Failed to clone repository {}: {}", repo.repo, e);
+                    e
+                })?;
+
+            tracing::debug!("Repository cloned to: {:?}", repo_path);
+
+            // Load hook definitions from the repository
+            tracing::debug!("Loading hook definitions from: {:?}", repo_path);
+            let hook_definitions = Config::load_repository_hook_definitions_static(&repo_path)
+                .map_err(|e| {
+                    tracing::error!(
+                        "Failed to load hook definitions from {:?}: {}",
+                        repo_path,
+                        e
+                    );
+                    e
+                })?;
+
+            tracing::debug!("Loaded {} hook definitions", hook_definitions.len());
+
+            // Merge user config with repository definitions
+            for user_hook in &mut repo.hooks {
+                if let Some(repo_hook_def) = hook_definitions.get(&user_hook.id) {
+                    tracing::debug!("Merging definition for hook: {}", user_hook.id);
+                    // Merge repository definition with user overrides
+                    Config::merge_hook_definition_static(user_hook, repo_hook_def);
+                }
+            }
+        }
+
+        tracing::debug!("External hook resolution completed");
+        Ok(())
+    }
+
+    /// Load hook definitions from a repository's .pre-commit-hooks.yaml file (static version)
+    fn load_repository_hook_definitions_static(repo_path: &Path) -> Result<HashMap<String, Hook>> {
+        let hooks_file = repo_path.join(".pre-commit-hooks.yaml");
+
+        if !hooks_file.exists() {
+            return Err(SnpError::Config(Box::new(ConfigError::NotFound {
+                path: hooks_file,
+                suggestion: Some(
+                    "Repository must contain a .pre-commit-hooks.yaml file".to_string(),
+                ),
+            })));
+        }
+
+        let hooks_content = std::fs::read_to_string(&hooks_file)?;
+        let hook_definitions: Vec<serde_yaml::Value> = serde_yaml::from_str(&hooks_content)
+            .map_err(|e| SnpError::Config(Box::<ConfigError>::from(e)))?;
+
+        let mut hooks_map = HashMap::new();
+
+        for hook_def in hook_definitions {
+            let hook_id = hook_def.get("id").and_then(|v| v.as_str()).ok_or_else(|| {
+                SnpError::Config(Box::new(ConfigError::ValidationFailed {
+                    message: "Hook missing required 'id' field".to_string(),
+                    file_path: Some(hooks_file.clone()),
+                    errors: vec![],
+                }))
+            })?;
+
+            let entry = hook_def
+                .get("entry")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    SnpError::Config(Box::new(ConfigError::ValidationFailed {
+                        message: format!("Hook '{hook_id}' missing required 'entry' field"),
+                        file_path: Some(hooks_file.clone()),
+                        errors: vec![],
+                    }))
+                })?;
+
+            let language = hook_def
+                .get("language")
+                .and_then(|v| v.as_str())
+                .unwrap_or("system");
+
+            let hook = Hook {
+                id: hook_id.to_string(),
+                name: hook_def
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                entry: entry.to_string(),
+                language: language.to_string(),
+                files: hook_def
+                    .get("files")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                exclude: hook_def
+                    .get("exclude")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                types: hook_def
+                    .get("types")
+                    .and_then(|v| v.as_sequence())
+                    .map(|seq| {
+                        seq.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .collect()
+                    }),
+                exclude_types: hook_def
+                    .get("exclude_types")
+                    .and_then(|v| v.as_sequence())
+                    .map(|seq| {
+                        seq.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .collect()
+                    }),
+                additional_dependencies: hook_def
+                    .get("additional_dependencies")
+                    .and_then(|v| v.as_sequence())
+                    .map(|seq| {
+                        seq.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .collect()
+                    }),
+                args: hook_def
+                    .get("args")
+                    .and_then(|v| v.as_sequence())
+                    .map(|seq| {
+                        seq.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .collect()
+                    }),
+                always_run: hook_def.get("always_run").and_then(|v| v.as_bool()),
+                fail_fast: hook_def.get("fail_fast").and_then(|v| v.as_bool()),
+                pass_filenames: hook_def.get("pass_filenames").and_then(|v| v.as_bool()),
+                stages: hook_def
+                    .get("stages")
+                    .and_then(|v| v.as_sequence())
+                    .map(|seq| {
+                        seq.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .collect()
+                    }),
+                verbose: hook_def.get("verbose").and_then(|v| v.as_bool()),
+            };
+
+            hooks_map.insert(hook_id.to_string(), hook);
+        }
+
+        Ok(hooks_map)
+    }
+
+    /// Merge repository hook definition with user configuration (static version)
+    fn merge_hook_definition_static(user_hook: &mut Hook, repo_hook: &Hook) {
+        // Always use repository's entry if user doesn't have one
+        if user_hook.entry.is_empty() {
+            user_hook.entry = repo_hook.entry.clone();
+        }
+
+        // Always use repository's language if user doesn't have one
+        if user_hook.language.is_empty() {
+            user_hook.language = repo_hook.language.clone();
+        }
+
+        // Use repository defaults for missing optional fields, but allow user overrides
+        if user_hook.name.is_none() && repo_hook.name.is_some() {
+            user_hook.name = repo_hook.name.clone();
+        }
+
+        if user_hook.files.is_none() && repo_hook.files.is_some() {
+            user_hook.files = repo_hook.files.clone();
+        }
+
+        if user_hook.exclude.is_none() && repo_hook.exclude.is_some() {
+            user_hook.exclude = repo_hook.exclude.clone();
+        }
+
+        if user_hook.types.is_none() && repo_hook.types.is_some() {
+            user_hook.types = repo_hook.types.clone();
+        }
+
+        if user_hook.exclude_types.is_none() && repo_hook.exclude_types.is_some() {
+            user_hook.exclude_types = repo_hook.exclude_types.clone();
+        }
+
+        if user_hook.additional_dependencies.is_none()
+            && repo_hook.additional_dependencies.is_some()
+        {
+            user_hook.additional_dependencies = repo_hook.additional_dependencies.clone();
+        }
+
+        if user_hook.always_run.is_none() && repo_hook.always_run.is_some() {
+            user_hook.always_run = repo_hook.always_run;
+        }
+
+        if user_hook.fail_fast.is_none() && repo_hook.fail_fast.is_some() {
+            user_hook.fail_fast = repo_hook.fail_fast;
+        }
+
+        if user_hook.pass_filenames.is_none() && repo_hook.pass_filenames.is_some() {
+            user_hook.pass_filenames = repo_hook.pass_filenames;
+        }
+
+        if user_hook.stages.is_none() && repo_hook.stages.is_some() {
+            user_hook.stages = repo_hook.stages.clone();
+        }
+
+        if user_hook.verbose.is_none() && repo_hook.verbose.is_some() {
+            user_hook.verbose = repo_hook.verbose;
+        }
+
+        // For args, merge repository args with user args (user args take precedence)
+        if user_hook.args.is_none() && repo_hook.args.is_some() {
+            user_hook.args = repo_hook.args.clone();
+        }
     }
 }
 

@@ -1309,6 +1309,7 @@ impl RustHookExecutor {
         Ok(HookExecutionResult {
             hook_id: "rust".to_string(), // Will be set by caller
             success: output.status.success(),
+            skipped: false,
             exit_code: output.status.code(),
             duration,
             files_processed: vec![], // Will be set by caller

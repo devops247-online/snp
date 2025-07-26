@@ -111,10 +111,24 @@ pub fn init_logging(config: LogConfig) -> Result<()> {
 
 /// Initialize pretty logging (similar to pre-commit format)
 fn init_pretty_logging(config: LogConfig, env_filter: EnvFilter) -> Result<()> {
-    fmt()
-        .with_env_filter(env_filter)
-        .with_target(config.show_targets)
-        .init();
+    // For regular users, we want clean output without timestamps and log levels
+    // Only show structured logs in verbose/debug mode
+    if config.level == Level::DEBUG || config.level == Level::TRACE {
+        // Verbose mode - show all structured logs with timestamps
+        fmt()
+            .with_env_filter(env_filter)
+            .with_target(config.show_targets)
+            .init();
+    } else {
+        // Normal mode - minimal structured logging, user-friendly output will be handled separately
+        // Only show ERROR level and above to avoid cluttering output
+        let minimal_filter = EnvFilter::new("snp=error");
+        fmt()
+            .with_env_filter(minimal_filter)
+            .with_target(false)
+            .without_time()
+            .init();
+    }
 
     Ok(())
 }

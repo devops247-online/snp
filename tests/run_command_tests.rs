@@ -151,6 +151,9 @@ async fn test_run_command_staged_files() {
     .await;
 
     // This assertion will fail initially (Red phase)
+    if let Err(ref e) = result {
+        eprintln!("Error in test_run_command_staged_files: {e:?}");
+    }
     assert!(result.is_ok());
 }
 
@@ -232,6 +235,9 @@ async fn test_run_command_specific_files() {
     )
     .await;
 
+    if let Err(ref e) = result {
+        eprintln!("Error in test_run_command_specific_files: {e:?}");
+    }
     assert!(result.is_ok());
 }
 
@@ -263,6 +269,9 @@ async fn test_run_command_single_hook() {
     )
     .await;
 
+    if let Err(ref e) = result {
+        eprintln!("Error in test_run_command_single_hook: {e:?}");
+    }
     assert!(result.is_ok());
 }
 
@@ -385,6 +394,9 @@ repos:
     )
     .await;
 
+    if let Err(ref e) = result {
+        eprintln!("Error in test_hook_execution_order: {e:?}");
+    }
     assert!(result.is_ok());
     // Should verify hooks executed in order: first-hook, second-hook, third-hook
 }
@@ -406,6 +418,9 @@ async fn test_parallel_execution() {
         snp::commands::run::execute_run_command(repo_path, ".pre-commit-config.yaml", &config)
             .await;
 
+    if let Err(ref e) = result {
+        eprintln!("Error in test_parallel_execution: {e:?}");
+    }
     assert!(result.is_ok());
 }
 
@@ -491,6 +506,9 @@ async fn test_from_ref_to_ref_functionality() {
     )
     .await;
 
+    if let Err(ref e) = result {
+        eprintln!("Error in test_from_ref_to_ref_functionality: {e:?}");
+    }
     assert!(result.is_ok());
 }
 
@@ -542,6 +560,9 @@ async fn test_output_formatting() {
         snp::commands::run::execute_run_command(repo_path, ".pre-commit-config.yaml", &config)
             .await;
 
+    if let Err(ref e) = result {
+        eprintln!("Error in test_output_formatting: {e:?}");
+    }
     assert!(result.is_ok());
     // Should verify proper output formatting, hook names, status indicators
 }
@@ -577,6 +598,9 @@ repos:
             .await;
 
     // Should show diff when files are modified
+    if let Err(ref e) = result {
+        eprintln!("Error in test_show_diff_on_failure: {e:?}");
+    }
     assert!(result.is_ok());
 }
 
@@ -600,6 +624,9 @@ async fn test_timing_and_performance_reporting() {
     .await;
     let _duration = start_time.elapsed();
 
+    if let Err(ref e) = result {
+        eprintln!("Error in test_timing_and_performance_reporting: {e:?}");
+    }
     assert!(result.is_ok());
     // Should collect and report timing information
 }
@@ -809,6 +836,9 @@ repos:
     )
     .await;
 
+    if let Err(ref e) = result {
+        eprintln!("Error in test_end_to_end_workflow: {e:?}");
+    }
     assert!(result.is_ok());
     let execution_result = result.unwrap();
     if !execution_result.success {
@@ -879,6 +909,9 @@ repos:
     )
     .await;
 
+    if let Err(ref e) = result {
+        eprintln!("Error in test_compatibility_with_python_precommit: {e:?}");
+    }
     assert!(result.is_ok());
     // Should behave identically to Python pre-commit
 }

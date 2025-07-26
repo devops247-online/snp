@@ -1511,6 +1511,7 @@ mod tests {
             HookExecutionResult {
                 hook_id: "test-hook-1".to_string(),
                 success: true,
+                skipped: false,
                 exit_code: Some(0),
                 duration: Duration::from_millis(100),
                 files_processed: vec![],
@@ -1522,6 +1523,7 @@ mod tests {
             HookExecutionResult {
                 hook_id: "test-hook-2".to_string(),
                 success: false,
+                skipped: false,
                 exit_code: Some(1),
                 duration: Duration::from_millis(50),
                 files_processed: vec![],
@@ -1558,6 +1560,7 @@ mod tests {
             HookExecutionResult {
                 hook_id: "test-hook-1".to_string(),
                 success: true,
+                skipped: false,
                 exit_code: Some(0),
                 duration: Duration::from_millis(100),
                 files_processed: vec![],
@@ -1569,6 +1572,7 @@ mod tests {
             HookExecutionResult {
                 hook_id: "test-hook-2".to_string(),
                 success: false,
+                skipped: false,
                 exit_code: Some(1),
                 duration: Duration::from_millis(50),
                 files_processed: vec![],
@@ -1607,6 +1611,7 @@ mod tests {
             HookExecutionResult {
                 hook_id: "test-hook-1".to_string(),
                 success: true,
+                skipped: false,
                 exit_code: Some(0),
                 duration: Duration::from_millis(100),
                 files_processed: vec![],
@@ -1618,6 +1623,7 @@ mod tests {
             HookExecutionResult {
                 hook_id: "test-hook-2".to_string(),
                 success: false,
+                skipped: false,
                 exit_code: Some(1),
                 duration: Duration::from_millis(50),
                 files_processed: vec![],

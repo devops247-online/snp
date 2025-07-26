@@ -37,7 +37,37 @@ impl TestEnvironment {
         age_days: u32,
     ) -> Result<PathBuf> {
         let deps = vec![];
-        let repo_path = self.store.clone_repository(url, revision, &deps)?;
+
+        // Create a local mock repository instead of trying to clone from fake GitHub URLs
+        let repo_hash = self.store.generate_repo_hash(url, revision, &deps);
+        let repos_dir = self.store.repos_directory();
+        let repo_path = repos_dir.join(format!("repo_{repo_hash}"));
+
+        // Create the mock repository directory and files
+        fs::create_dir_all(&repo_path)?;
+
+        // Create a fake .git directory to make it look like a git repo
+        fs::create_dir_all(repo_path.join(".git"))?;
+        fs::write(repo_path.join(".git/HEAD"), "ref: refs/heads/main")?;
+
+        // Create some mock files
+        fs::write(
+            repo_path.join("README.md"),
+            format!("# Mock repository\nURL: {url}\nRevision: {revision}"),
+        )?;
+        fs::write(
+            repo_path.join(".pre-commit-hooks.yaml"),
+            r#"
+- id: mock-hook
+  name: Mock Hook
+  entry: echo "mock hook"
+  language: system
+"#,
+        )?;
+
+        // Add to storage database
+        self.store
+            .add_repository(url, revision, &deps, &repo_path)?;
 
         // Simulate age by manually updating the database
         if age_days > 0 {

@@ -53,16 +53,28 @@ fn create_test_env_dir(base_dir: &Path, env_name: &str) -> PathBuf {
 
 #[test]
 fn test_repository_caching_store_and_retrieve() {
-    let (store, _temp_dir) = create_test_store();
+    let (store, temp_dir) = create_test_store();
 
     let url = "https://github.com/example/repo.git";
     let revision = "abc123";
     let dependencies = vec!["dep1".to_string(), "dep2".to_string()];
 
-    // Store a repository
-    let repo_path = store
-        .clone_repository(url, revision, &dependencies)
-        .expect("Failed to clone repository");
+    // Create mock repository directory
+    let repo_path = create_test_repo_dir(store.cache_directory(), "example_repo_abc123");
+
+    // Create SNP marker file
+    let marker_file = repo_path.join(".snp_repo_marker");
+    let marker_content = format!(
+        "Repository: {}\nRevision: {}\nDependencies: {:?}\n",
+        url, revision, dependencies
+    );
+    std::fs::write(&marker_file, marker_content).expect("Failed to create marker file");
+
+    // Add repository to database
+    store
+        .add_repository(url, revision, &dependencies, &repo_path)
+        .expect("Failed to add repository to database");
+
     assert!(repo_path.exists(), "Repository path should exist");
     assert!(
         repo_path.join(".snp_repo_marker").exists(),
@@ -107,15 +119,27 @@ fn test_repository_caching_get_nonexistent() {
 
 #[test]
 fn test_repository_caching_update_last_used() {
-    let (store, _temp_dir) = create_test_store();
+    let (store, temp_dir) = create_test_store();
 
     let url = "https://github.com/example/repo.git";
     let revision = "abc123";
     let dependencies = vec![];
 
-    // First, store a repository
-    let result = store.clone_repository(url, revision, &dependencies);
-    assert!(result.is_ok(), "Should clone repository");
+    // Create mock repository directory
+    let repo_path = create_test_repo_dir(store.cache_directory(), "example_repo_update_test");
+
+    // Create SNP marker file
+    let marker_file = repo_path.join(".snp_repo_marker");
+    let marker_content = format!(
+        "Repository: {}\nRevision: {}\nDependencies: {:?}\n",
+        url, revision, dependencies
+    );
+    std::fs::write(&marker_file, marker_content).expect("Failed to create marker file");
+
+    // Add repository to database
+    store
+        .add_repository(url, revision, &dependencies, &repo_path)
+        .expect("Failed to add repository to database");
 
     // Wait a moment to ensure different timestamp
     std::thread::sleep(Duration::from_millis(100));
@@ -129,21 +153,39 @@ fn test_repository_caching_update_last_used() {
 
 #[test]
 fn test_repository_caching_with_dependencies() {
-    let (store, _temp_dir) = create_test_store();
+    let (store, temp_dir) = create_test_store();
 
     let url = "https://github.com/example/hooks.git";
     let revision = "v1.0.0";
     let deps1 = vec!["python".to_string(), "black==22.0".to_string()];
     let deps2 = vec!["python".to_string(), "flake8==4.0".to_string()];
 
-    // Same URL and revision but different dependencies should be stored separately
-    let result1 = store.clone_repository(url, revision, &deps1);
-    assert!(result1.is_ok(), "Should clone repository with deps1");
-    let path1 = result1.unwrap();
+    // Create mock repository directories for different dependencies
+    let path1 = create_test_repo_dir(store.cache_directory(), "hooks_deps1");
+    let path2 = create_test_repo_dir(store.cache_directory(), "hooks_deps2");
 
-    let result2 = store.clone_repository(url, revision, &deps2);
-    assert!(result2.is_ok(), "Should clone repository with deps2");
-    let path2 = result2.unwrap();
+    // Create SNP marker files
+    let marker1 = path1.join(".snp_repo_marker");
+    let marker_content1 = format!(
+        "Repository: {}\nRevision: {}\nDependencies: {:?}\n",
+        url, revision, deps1
+    );
+    std::fs::write(&marker1, marker_content1).expect("Failed to create marker file 1");
+
+    let marker2 = path2.join(".snp_repo_marker");
+    let marker_content2 = format!(
+        "Repository: {}\nRevision: {}\nDependencies: {:?}\n",
+        url, revision, deps2
+    );
+    std::fs::write(&marker2, marker_content2).expect("Failed to create marker file 2");
+
+    // Add repositories to database
+    store
+        .add_repository(url, revision, &deps1, &path1)
+        .expect("Failed to add repository with deps1");
+    store
+        .add_repository(url, revision, &deps2, &path2)
+        .expect("Failed to add repository with deps2");
 
     // Should be able to retrieve both independently
     let repo1 = store.get_repository(url, revision, &deps1);
@@ -159,13 +201,13 @@ fn test_repository_caching_with_dependencies() {
         path1, path2,
         "Different dependencies should create different paths"
     );
-    assert_eq!(path1, repo1_path, "Retrieved path should match cloned path");
-    assert_eq!(path2, repo2_path, "Retrieved path should match cloned path");
+    assert_eq!(path1, repo1_path, "Retrieved path should match stored path");
+    assert_eq!(path2, repo2_path, "Retrieved path should match stored path");
 }
 
 #[test]
 fn test_repository_caching_cleanup_old_repositories() {
-    let (store, _temp_dir) = create_test_store();
+    let (store, temp_dir) = create_test_store();
 
     // Store multiple repositories
     let repos = vec![
@@ -174,9 +216,23 @@ fn test_repository_caching_cleanup_old_repositories() {
         ("https://github.com/repo3.git", "main", vec![]),
     ];
 
-    for (url, rev, deps) in &repos {
-        let result = store.clone_repository(url, rev, deps);
-        assert!(result.is_ok(), "Should clone repository {}", url);
+    for (i, (url, rev, deps)) in repos.iter().enumerate() {
+        // Create mock repository directory
+        let repo_path =
+            create_test_repo_dir(store.cache_directory(), &format!("cleanup_test_repo_{}", i));
+
+        // Create SNP marker file
+        let marker_file = repo_path.join(".snp_repo_marker");
+        let marker_content = format!(
+            "Repository: {}\nRevision: {}\nDependencies: {:?}\n",
+            url, rev, deps
+        );
+        std::fs::write(&marker_file, marker_content).expect("Failed to create marker file");
+
+        // Add repository to database
+        store
+            .add_repository(url, rev, deps, &repo_path)
+            .unwrap_or_else(|_| panic!("Failed to add repository {}", url));
     }
 
     // Verify repositories exist
@@ -197,7 +253,7 @@ fn test_repository_caching_cleanup_old_repositories() {
 
 #[test]
 fn test_repository_caching_list_all() {
-    let (store, _temp_dir) = create_test_store();
+    let (store, temp_dir) = create_test_store();
 
     // Store several repositories
     let repos = vec![
@@ -209,9 +265,23 @@ fn test_repository_caching_list_all() {
         ),
     ];
 
-    for (url, rev, deps) in &repos {
-        let result = store.clone_repository(url, rev, deps);
-        assert!(result.is_ok(), "Should clone repository {}", url);
+    for (i, (url, rev, deps)) in repos.iter().enumerate() {
+        // Create mock repository directory
+        let repo_path =
+            create_test_repo_dir(store.cache_directory(), &format!("list_test_repo_{}", i));
+
+        // Create SNP marker file
+        let marker_file = repo_path.join(".snp_repo_marker");
+        let marker_content = format!(
+            "Repository: {}\nRevision: {}\nDependencies: {:?}\n",
+            url, rev, deps
+        );
+        std::fs::write(&marker_file, marker_content).expect("Failed to create marker file");
+
+        // Add repository to database
+        store
+            .add_repository(url, rev, deps, &repo_path)
+            .unwrap_or_else(|_| panic!("Failed to add repository {}", url));
     }
 
     // List all repositories
@@ -417,9 +487,27 @@ fn test_concurrent_access_multiple_processes() {
         .map(|i| {
             let cache_dir = cache_dir.clone();
             std::thread::spawn(move || {
-                let store = Store::with_cache_directory(cache_dir).expect("Failed to create store");
+                let store =
+                    Store::with_cache_directory(cache_dir.clone()).expect("Failed to create store");
                 let url = format!("https://github.com/repo{}.git", i);
-                let result = store.clone_repository(&url, "main", &vec![]);
+
+                // Create mock repository directory
+                let repo_path = create_test_repo_dir(
+                    store.cache_directory(),
+                    &format!("concurrent_repo_{}", i),
+                );
+
+                // Create SNP marker file
+                let marker_file = repo_path.join(".snp_repo_marker");
+                let marker_content = format!(
+                    "Repository: {}\nRevision: main\nDependencies: {:?}\n",
+                    url,
+                    Vec::<String>::new()
+                );
+                std::fs::write(&marker_file, marker_content).expect("Failed to create marker file");
+
+                // Add repository to database
+                let result = store.add_repository(&url, "main", &vec![], &repo_path);
                 result
             })
         })
@@ -511,10 +599,21 @@ fn test_concurrent_access_lock_timeout() {
 
 #[test]
 fn test_concurrent_access_deadlock_prevention() {
-    let (store, _temp_dir) = create_test_store();
+    let (store, temp_dir) = create_test_store();
+
+    // Create mock repository directory
+    let repo_path = create_test_repo_dir(store.cache_directory(), "deadlock_test_repo");
+
+    // Create SNP marker file
+    let marker_file = repo_path.join(".snp_repo_marker");
+    let marker_content = format!(
+        "Repository: https://repo1.git\nRevision: main\nDependencies: {:?}\n",
+        Vec::<String>::new()
+    );
+    std::fs::write(&marker_file, marker_content).expect("Failed to create marker file");
 
     // Create scenario that could cause deadlock
-    let result1 = store.clone_repository("https://repo1.git", "main", &vec![]);
+    let result1 = store.add_repository("https://repo1.git", "main", &vec![], &repo_path);
     assert!(result1.is_ok(), "Repository operation should succeed");
 
     let result2 = store.install_environment("python", &vec!["package".to_string()]);
@@ -729,13 +828,28 @@ fn test_config_tracking_cleanup_missing() {
 
 #[test]
 fn test_performance_large_number_repositories() {
-    let (store, _temp_dir) = create_test_store();
+    let (store, temp_dir) = create_test_store();
 
     // Store 100 repositories (reduced for reasonable test time)
     let start = SystemTime::now();
     for i in 0..100 {
         let url = format!("https://github.com/repo{}.git", i);
-        let result = store.clone_repository(&url, "main", &vec![]);
+
+        // Create mock repository directory
+        let repo_path =
+            create_test_repo_dir(store.cache_directory(), &format!("perf_test_repo_{}", i));
+
+        // Create SNP marker file
+        let marker_file = repo_path.join(".snp_repo_marker");
+        let marker_content = format!(
+            "Repository: {}\nRevision: main\nDependencies: {:?}\n",
+            url,
+            Vec::<String>::new()
+        );
+        std::fs::write(&marker_file, marker_content).expect("Failed to create marker file");
+
+        // Add repository to database
+        let result = store.add_repository(&url, "main", &vec![], &repo_path);
         assert!(result.is_ok(), "Should store repository {}", i);
     }
     let duration = start.elapsed().unwrap();
@@ -754,12 +868,27 @@ fn test_performance_large_number_repositories() {
 
 #[test]
 fn test_performance_database_query_speed() {
-    let (store, _temp_dir) = create_test_store();
+    let (store, temp_dir) = create_test_store();
 
     // Add some test data first
     for i in 0..50 {
         let url = format!("https://github.com/repo{}.git", i);
-        let result = store.clone_repository(&url, "main", &vec![]);
+
+        // Create mock repository directory
+        let repo_path =
+            create_test_repo_dir(store.cache_directory(), &format!("query_perf_repo_{}", i));
+
+        // Create SNP marker file
+        let marker_file = repo_path.join(".snp_repo_marker");
+        let marker_content = format!(
+            "Repository: {}\nRevision: main\nDependencies: {:?}\n",
+            url,
+            Vec::<String>::new()
+        );
+        std::fs::write(&marker_file, marker_content).expect("Failed to create marker file");
+
+        // Add repository to database
+        let result = store.add_repository(&url, "main", &vec![], &repo_path);
         assert!(result.is_ok(), "Should store repository {}", i);
     }
 
@@ -782,14 +911,27 @@ fn test_performance_database_query_speed() {
 
 #[test]
 fn test_edge_case_empty_dependencies() {
-    let (store, _temp_dir) = create_test_store();
+    let (store, temp_dir) = create_test_store();
 
     let url = "https://github.com/simple/repo.git";
     let revision = "main";
     let empty_deps: Vec<String> = vec![];
 
-    let result = store.clone_repository(url, revision, &empty_deps);
-    assert!(result.is_ok(), "Should handle empty dependencies");
+    // Create mock repository directory
+    let repo_path = create_test_repo_dir(store.cache_directory(), "empty_deps_test");
+
+    // Create SNP marker file
+    let marker_file = repo_path.join(".snp_repo_marker");
+    let marker_content = format!(
+        "Repository: {}\nRevision: {}\nDependencies: {:?}\n",
+        url, revision, empty_deps
+    );
+    std::fs::write(&marker_file, marker_content).expect("Failed to create marker file");
+
+    // Add repository to database
+    store
+        .add_repository(url, revision, &empty_deps, &repo_path)
+        .expect("Failed to add repository with empty dependencies");
 
     let repo = store.get_repository(url, revision, &empty_deps);
     assert!(
@@ -802,7 +944,7 @@ fn test_edge_case_empty_dependencies() {
 
 #[test]
 fn test_edge_case_very_long_paths() {
-    let (store, _temp_dir) = create_test_store();
+    let (store, temp_dir) = create_test_store();
 
     // Create very long URL and paths
     let long_url = format!(
@@ -814,7 +956,20 @@ fn test_edge_case_very_long_paths() {
         "directory".repeat(20)
     ));
 
-    let result = store.clone_repository(&long_url, "main", &vec![]);
+    // Create mock repository directory
+    let repo_path = create_test_repo_dir(store.cache_directory(), "long_path_test");
+
+    // Create SNP marker file
+    let marker_file = repo_path.join(".snp_repo_marker");
+    let marker_content = format!(
+        "Repository: {}\nRevision: main\nDependencies: {:?}\n",
+        long_url,
+        Vec::<String>::new()
+    );
+    std::fs::write(&marker_file, marker_content).expect("Failed to create marker file");
+
+    // Add repository to database
+    let result = store.add_repository(&long_url, "main", &vec![], &repo_path);
     assert!(result.is_ok(), "Should handle very long URLs");
 
     let result = store.mark_config_used(&long_config_path);
@@ -825,14 +980,27 @@ fn test_edge_case_very_long_paths() {
 
 #[test]
 fn test_edge_case_special_characters() {
-    let (store, _temp_dir) = create_test_store();
+    let (store, temp_dir) = create_test_store();
 
     // Test URLs and paths with special characters
     let special_url = "https://github.com/org/repo-with-special-chars_@#.git";
     let special_path =
         PathBuf::from("/path/with spaces/and-special_chars@#/.pre-commit-config.yaml");
 
-    let result = store.clone_repository(special_url, "main", &vec![]);
+    // Create mock repository directory
+    let repo_path = create_test_repo_dir(store.cache_directory(), "special_chars_test");
+
+    // Create SNP marker file
+    let marker_file = repo_path.join(".snp_repo_marker");
+    let marker_content = format!(
+        "Repository: {}\nRevision: main\nDependencies: {:?}\n",
+        special_url,
+        Vec::<String>::new()
+    );
+    std::fs::write(&marker_file, marker_content).expect("Failed to create marker file");
+
+    // Add repository to database
+    let result = store.add_repository(special_url, "main", &vec![], &repo_path);
     assert!(result.is_ok(), "Should handle URLs with special characters");
 
     let result = store.mark_config_used(&special_path);

@@ -68,6 +68,8 @@ impl LanguageHookExecutor {
             isolation_level: super::environment::IsolationLevel::Partial,
             working_directory: None,
             version: hook.minimum_pre_commit_version.clone(),
+            repository_path: None,
+            hook_timeout: None,
         };
 
         let env = {

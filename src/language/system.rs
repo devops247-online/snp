@@ -396,7 +396,48 @@ impl SystemLanguagePlugin {
         env: &LanguageEnvironment,
         files: &[PathBuf],
     ) -> Result<Command> {
-        let mut command = Command::new(&hook.entry);
+        self.build_system_command_with_timeout(hook, env, files, None)
+    }
+
+    /// Build command for execution with optional timeout override
+    pub fn build_system_command_with_timeout(
+        &self,
+        hook: &Hook,
+        env: &LanguageEnvironment,
+        files: &[PathBuf],
+        timeout_override: Option<Duration>,
+    ) -> Result<Command> {
+        // Parse the entry command - it might contain spaces like "cargo fmt"
+        let entry_parts: Vec<&str> = hook.entry.split_whitespace().collect();
+        if entry_parts.is_empty() {
+            return Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
+                language: "system".to_string(),
+                error: format!("Empty hook entry: {}", hook.entry),
+                recovery_suggestion: None,
+            }));
+        }
+
+        tracing::debug!(
+            "System plugin: parsed entry '{}' into executable '{}' with {} initial args",
+            hook.entry,
+            entry_parts[0],
+            entry_parts.len() - 1
+        );
+        tracing::debug!("Files being passed to hook {}: {:?}", hook.id, files);
+
+        let mut command = Command::new(entry_parts[0]);
+        tracing::debug!("Created command with executable: '{}'", command.executable);
+
+        // Add the remaining parts of the entry as arguments
+        for part in &entry_parts[1..] {
+            command.arg(*part);
+            tracing::debug!("Added argument: '{}'", part);
+        }
+        tracing::debug!(
+            "Command after parsing - executable: '{}', args: {:?}",
+            command.executable,
+            command.arguments
+        );
 
         // Add hook arguments
         for arg in &hook.args {
@@ -415,13 +456,20 @@ impl SystemLanguagePlugin {
             command.env(key, value);
         }
 
-        // Set working directory
-        if let Some(parent) = env.root_path.parent() {
-            command.current_dir(parent);
+        // Set working directory - use the project working directory from environment
+        if let Some(working_dir_str) = env.environment_variables.get("SNP_WORKING_DIRECTORY") {
+            let working_dir = PathBuf::from(working_dir_str);
+            tracing::debug!("Setting working directory to: {}", working_dir.display());
+            command.current_dir(working_dir);
+        } else {
+            // Fallback to current directory if not set
+            tracing::debug!("No working directory set, using current directory");
         }
 
-        // Set timeout
-        command.timeout(self.config.max_execution_time);
+        // Set timeout - use override if provided, otherwise use config default
+        let timeout = timeout_override.unwrap_or(self.config.max_execution_time);
+        tracing::debug!("Setting command timeout to: {:?}", timeout);
+        command.timeout(timeout);
 
         Ok(command)
     }
@@ -429,6 +477,13 @@ impl SystemLanguagePlugin {
     /// Execute a system command
     pub async fn execute_system_command(&self, command: Command) -> Result<HookExecutionResult> {
         let start_time = Instant::now();
+
+        tracing::debug!(
+            "System executing command: {} with args: {:?} in dir: {:?}",
+            command.executable,
+            command.arguments,
+            command.working_directory
+        );
 
         // Build tokio command
         let mut tokio_cmd = TokioCommand::new(&command.executable);
@@ -445,18 +500,52 @@ impl SystemLanguagePlugin {
         // Execute with timeout
         let output = if let Some(timeout) = command.timeout {
             match tokio::time::timeout(timeout, tokio_cmd.output()).await {
-                Ok(output) => output?,
+                Ok(output) => output.map_err(|e| {
+                    SnpError::from(LanguageError::EnvironmentSetupFailed {
+                        language: "system".to_string(),
+                        error: format!(
+                            "Failed to execute '{}' with args {:?} in dir {:?}: {}",
+                            command.executable, command.arguments, command.working_directory, e
+                        ),
+                        recovery_suggestion: Some(
+                            "Check if the command exists and is executable".to_string(),
+                        ),
+                    })
+                })?,
                 Err(_) => {
-                    return Err(SnpError::from(Box::new(
-                        crate::error::ProcessError::Timeout {
-                            command: command.executable.clone(),
-                            duration: timeout,
-                        },
-                    )));
+                    // Handle timeout - create a failed result instead of returning error
+                    let duration = start_time.elapsed();
+                    return Ok(HookExecutionResult {
+                        hook_id: "system".to_string(),
+                        success: false,
+                        skipped: false,
+                        exit_code: None,
+                        duration,
+                        files_processed: vec![],
+                        files_modified: vec![],
+                        stdout: String::new(),
+                        stderr: format!("Process timeout after {}ms", timeout.as_millis()),
+                        error: Some(crate::error::HookExecutionError::ExecutionTimeout {
+                            hook_id: "system".to_string(),
+                            timeout,
+                            partial_output: None,
+                        }),
+                    });
                 }
             }
         } else {
-            tokio_cmd.output().await?
+            tokio_cmd.output().await.map_err(|e| {
+                SnpError::from(LanguageError::EnvironmentSetupFailed {
+                    language: "system".to_string(),
+                    error: format!(
+                        "Failed to execute '{}' with args {:?} in dir {:?}: {}",
+                        command.executable, command.arguments, command.working_directory, e
+                    ),
+                    recovery_suggestion: Some(
+                        "Check if the command exists and is executable".to_string(),
+                    ),
+                })
+            })?
         };
 
         let duration = start_time.elapsed();
@@ -464,6 +553,7 @@ impl SystemLanguagePlugin {
         Ok(HookExecutionResult {
             hook_id: "system".to_string(), // Will be overridden by caller
             success: output.status.success(),
+            skipped: false,
             exit_code: output.status.code(),
             duration,
             files_processed: vec![], // Will be set by caller
@@ -554,7 +644,10 @@ impl Language for SystemLanguagePlugin {
 
     async fn setup_environment(&self, config: &EnvironmentConfig) -> Result<LanguageEnvironment> {
         let environment_id = format!("system-{}", uuid::Uuid::new_v4());
-        let root_path = std::env::current_dir()?;
+        let root_path = config
+            .working_directory
+            .clone()
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
         let mut environment_variables = Self::get_base_environment()?;
 
@@ -563,11 +656,45 @@ impl Language for SystemLanguagePlugin {
             environment_variables.insert(key.clone(), value.clone());
         }
 
+        // Set timeout in environment variables if provided
+        if let Some(timeout) = config.hook_timeout {
+            environment_variables.insert(
+                "SNP_HOOK_TIMEOUT".to_string(),
+                timeout.as_millis().to_string(),
+            );
+        }
+
+        // Set working directory in environment variables if provided
+        if let Some(ref working_dir) = config.working_directory {
+            environment_variables.insert(
+                "SNP_WORKING_DIRECTORY".to_string(),
+                working_dir.to_string_lossy().to_string(),
+            );
+        }
+
+        // If we have a repository path, add it to the PATH so hooks can be found
+        let executable_path = if let Some(repo_path) = &config.repository_path {
+            // Add the repository path to PATH so hook executables can be found
+            let current_path = environment_variables
+                .get("PATH")
+                .unwrap_or(&String::new())
+                .clone();
+            let new_path = if current_path.is_empty() {
+                repo_path.to_string_lossy().to_string()
+            } else {
+                format!("{}:{}", repo_path.to_string_lossy(), current_path)
+            };
+            environment_variables.insert("PATH".to_string(), new_path);
+            repo_path.clone()
+        } else {
+            root_path.clone()
+        };
+
         Ok(LanguageEnvironment {
             language: "system".to_string(),
             environment_id,
             root_path: root_path.clone(),
-            executable_path: root_path, // System executables are in PATH
+            executable_path,
             environment_variables,
             installed_dependencies: vec![], // System doesn't install dependencies
             metadata: super::environment::EnvironmentMetadata {
@@ -602,7 +729,17 @@ impl Language for SystemLanguagePlugin {
         env: &LanguageEnvironment,
         files: &[PathBuf],
     ) -> Result<HookExecutionResult> {
+        tracing::debug!(
+            "System plugin executing hook: {} with entry: {}",
+            hook.id,
+            hook.entry
+        );
         let command = self.build_command(hook, env, files)?;
+        tracing::debug!(
+            "System plugin built command: {:?} with args: {:?}",
+            command.executable,
+            command.arguments
+        );
         let mut result = self.execute_system_command(command).await?;
 
         // Set the correct hook ID and files
@@ -618,7 +755,14 @@ impl Language for SystemLanguagePlugin {
         env: &LanguageEnvironment,
         files: &[PathBuf],
     ) -> Result<Command> {
-        self.build_system_command(hook, env, files)
+        // Check if there's a timeout in the environment metadata
+        let timeout_override = env
+            .environment_variables
+            .get("SNP_HOOK_TIMEOUT")
+            .and_then(|t| t.parse::<u64>().ok())
+            .map(Duration::from_millis);
+
+        self.build_system_command_with_timeout(hook, env, files, timeout_override)
     }
 
     async fn resolve_dependencies(&self, dependencies: &[String]) -> Result<Vec<Dependency>> {

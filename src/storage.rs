@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tracing::{debug, error};
 
 use crate::error::{Result, SnpError, StorageError};
 
@@ -178,6 +179,14 @@ impl Store {
             // These PRAGMAs return results, so we need to use query methods
             connection.pragma_update(None, "journal_mode", "WAL")?;
             connection.pragma_update(None, "synchronous", "NORMAL")?;
+
+            // Additional configurations for better concurrent access
+            connection.pragma_update(None, "cache_size", "-64000")?; // 64MB cache
+            connection.pragma_update(None, "temp_store", "MEMORY")?;
+            connection.pragma_update(None, "mmap_size", "268435456")?; // 256MB mmap
+
+            // Configure busy timeout for better handling of concurrent access
+            connection.busy_timeout(std::time::Duration::from_millis(30000))?;
         }
 
         // Create schema if database is new
@@ -605,15 +614,82 @@ impl Store {
         let repo_hash = self.generate_repo_hash(url, revision, dependencies);
         let repo_dir = repos_dir.join(format!("repo_{repo_hash}"));
 
-        // Create the repository directory
-        fs::create_dir_all(&repo_dir).map_err(|e| {
+        // Ensure parent directory exists
+        if let Some(parent) = repo_dir.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                SnpError::Storage(Box::new(StorageError::CacheDirectoryFailed {
+                    path: parent.to_path_buf(),
+                    error: format!("Failed to create parent directory: {e}"),
+                }))
+            })?;
+        }
+
+        // Remove existing directory if it exists to ensure clean clone
+        if repo_dir.exists() {
+            debug!("Removing existing directory: {}", repo_dir.display());
+            fs::remove_dir_all(&repo_dir).map_err(|e| {
+                SnpError::Storage(Box::new(StorageError::CacheDirectoryFailed {
+                    path: repo_dir.clone(),
+                    error: format!("Failed to remove existing directory: {e}"),
+                }))
+            })?;
+        }
+
+        // Clone the repository using git2 (this will create the directory)
+        debug!("Cloning repository {} to {}", url, repo_dir.display());
+        let mut builder = git2::build::RepoBuilder::new();
+        let git_repo = builder.clone(url, &repo_dir).map_err(|e| {
+            error!(
+                "Failed to clone repository {} to {}: {}",
+                url,
+                repo_dir.display(),
+                e.message()
+            );
             SnpError::Storage(Box::new(StorageError::CacheDirectoryFailed {
                 path: repo_dir.clone(),
-                error: e.to_string(),
+                error: format!("Failed to clone repository '{}': {}", url, e.message()),
             }))
         })?;
 
-        // For now, create a placeholder - actual git cloning would be implemented here
+        // Checkout specific revision if requested and not HEAD
+        if revision != "HEAD" {
+            debug!("Checking out revision: {}", revision);
+
+            // Try to resolve and checkout the revision
+            match git_repo.revparse_single(revision) {
+                Ok(obj) => {
+                    debug!("Found revision object: {}", obj.id());
+                    git_repo.checkout_tree(&obj, None).map_err(|e| {
+                        SnpError::Storage(Box::new(StorageError::CacheDirectoryFailed {
+                            path: repo_dir.clone(),
+                            error: format!(
+                                "Failed to checkout revision '{}': {}",
+                                revision,
+                                e.message()
+                            ),
+                        }))
+                    })?;
+
+                    // Set HEAD to the checked out revision
+                    git_repo.set_head_detached(obj.id()).map_err(|e| {
+                        SnpError::Storage(Box::new(StorageError::CacheDirectoryFailed {
+                            path: repo_dir.clone(),
+                            error: format!(
+                                "Failed to set HEAD to revision '{}': {}",
+                                revision,
+                                e.message()
+                            ),
+                        }))
+                    })?;
+                }
+                Err(e) => {
+                    debug!("Could not resolve revision '{}': {}", revision, e.message());
+                    // Continue with HEAD if revision can't be resolved
+                }
+            }
+        }
+
+        // Create marker file for tracking
         let marker_file = repo_dir.join(".snp_repo_marker");
         let marker_content =
             format!("Repository: {url}\nRevision: {revision}\nDependencies: {dependencies:?}\n");
@@ -714,7 +790,7 @@ impl Store {
     }
 
     /// Generate a hash for repository directory naming
-    fn generate_repo_hash(&self, url: &str, revision: &str, dependencies: &[String]) -> String {
+    pub fn generate_repo_hash(&self, url: &str, revision: &str, dependencies: &[String]) -> String {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
@@ -723,6 +799,31 @@ impl Store {
         revision.hash(&mut hasher);
         dependencies.hash(&mut hasher);
         format!("{:x}", hasher.finish())
+    }
+
+    /// Get the repositories directory path
+    pub fn repos_directory(&self) -> PathBuf {
+        self.cache_dir.join("repos")
+    }
+
+    /// Add a repository to the database (for testing)
+    pub fn add_repository(
+        &self,
+        url: &str,
+        revision: &str,
+        dependencies: &[String],
+        path: &Path,
+    ) -> Result<()> {
+        let connection = self.connection.lock().unwrap();
+        let now = Self::system_time_to_timestamp(SystemTime::now());
+        let deps_json = Self::serialize_dependencies(dependencies);
+
+        connection.execute(
+            "INSERT OR REPLACE INTO repositories (url, revision, path, dependencies, created_at, last_used) VALUES (?, ?, ?, ?, ?, ?)",
+            params![url, revision, path.to_string_lossy().as_ref(), deps_json, now, now],
+        )?;
+
+        Ok(())
     }
 
     /// List all cached repositories
