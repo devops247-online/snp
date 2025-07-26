@@ -27,7 +27,7 @@ serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 
 # Graph algorithms for hook chaining
-petgraph = "0.6"
+petgraph = "0.8"
 daggy = "0.9"
 async-trait = "0.1"
 
