@@ -878,6 +878,7 @@ mod tests {
             pass_filenames: None,
             stages: None,
             verbose: None,
+            depends_on: None,
         };
         let result = validator.validate_hook(&hook, 0);
 
@@ -901,6 +902,7 @@ mod tests {
             pass_filenames: Some(true),
             stages: Some(vec!["pre-commit".to_string()]),
             verbose: Some(false),
+            depends_on: None,
         };
         let valid_result = validator.validate_hook(&valid_hook, 0);
         assert!(valid_result.is_valid);
@@ -922,6 +924,7 @@ mod tests {
             pass_filenames: None,
             stages: Some(vec!["pre-commit".to_string()]),
             verbose: None,
+            depends_on: None,
         };
         let invalid_regex_result = validator.validate_hook(&invalid_regex_hook, 0);
         assert!(!invalid_regex_result.is_valid);
@@ -964,6 +967,7 @@ mod tests {
                 pass_filenames: None,
                 stages: Some(vec!["pre-commit".to_string()]),
                 verbose: None,
+                depends_on: None,
             }],
         };
 
@@ -990,6 +994,7 @@ mod tests {
                 pass_filenames: None,
                 stages: Some(vec!["pre-commit".to_string()]),
                 verbose: None,
+                depends_on: None,
             }],
         };
 
@@ -1024,6 +1029,7 @@ mod tests {
                         pass_filenames: None,
                         stages: Some(vec!["pre-commit".to_string()]),
                         verbose: None,
+                        depends_on: None,
                     }],
                 },
                 Repository {
@@ -1045,6 +1051,7 @@ mod tests {
                         pass_filenames: None,
                         stages: Some(vec!["pre-commit".to_string()]),
                         verbose: None,
+                        depends_on: None,
                     }],
                 },
             ],
@@ -1171,6 +1178,7 @@ mod tests {
                     pass_filenames: None,
                     stages: Some(vec!["pre-commit".to_string()]),
                     verbose: None,
+                    depends_on: None,
                 }],
             }],
             default_install_hook_types: None,

@@ -436,15 +436,71 @@ impl HookExecutionEngine {
     ) -> Result<ExecutionResult> {
         tracing::debug!("Starting execution of {} hooks", hooks.len());
 
+        // Resolve hook dependencies to determine execution order
+        let ordered_hooks = self.resolve_hook_dependencies(hooks)?;
+        tracing::debug!(
+            "Resolved hook execution order: {:?}",
+            ordered_hooks.iter().map(|h| &h.id).collect::<Vec<_>>()
+        );
+
+        // Check if any hooks have dependencies - if so, force sequential execution
+        let has_dependencies = hooks.iter().any(|hook| !hook.depends_on.is_empty());
+
         // Decide whether to use parallel or sequential execution
-        // Enable parallel execution by default unless fail_fast is enabled
-        let use_parallel = config.max_parallel_hooks > 1 && hooks.len() > 1 && !config.fail_fast;
+        // Force sequential execution if hooks have dependencies or fail_fast is enabled
+        let use_parallel = config.max_parallel_hooks > 1
+            && hooks.len() > 1
+            && !config.fail_fast
+            && !has_dependencies;
 
         if use_parallel {
-            self.execute_hooks_parallel(hooks, config).await
+            self.execute_hooks_parallel(&ordered_hooks, config).await
         } else {
-            self.execute_hooks_sequential(hooks, config).await
+            self.execute_hooks_sequential(&ordered_hooks, config).await
         }
+    }
+
+    /// Resolve hook dependencies and return hooks in topological order
+    pub fn resolve_hook_dependencies(&self, hooks: &[Hook]) -> Result<Vec<Hook>> {
+        // If no hooks have dependencies, preserve original order for backward compatibility
+        let has_dependencies = hooks.iter().any(|hook| !hook.depends_on.is_empty());
+        if !has_dependencies {
+            return Ok(hooks.to_vec());
+        }
+
+        use crate::concurrency::TaskDependencyGraph;
+
+        // Create dependency graph
+        let mut graph = TaskDependencyGraph::new();
+
+        // Add all hooks as tasks
+        for hook in hooks {
+            let task_config = crate::concurrency::TaskConfig::new(&hook.id);
+            graph.add_task(task_config);
+        }
+
+        // Add dependencies
+        for hook in hooks {
+            for dependency_id in &hook.depends_on {
+                graph.add_dependency(&hook.id, dependency_id)?;
+            }
+        }
+
+        // Detect cycles before proceeding
+        graph.detect_cycles()?;
+
+        // Get execution order
+        let execution_order = graph.resolve_execution_order()?;
+
+        // Create ordered hooks vector
+        let mut ordered_hooks = Vec::new();
+        for hook_id in execution_order {
+            if let Some(hook) = hooks.iter().find(|h| h.id == hook_id) {
+                ordered_hooks.push(hook.clone());
+            }
+        }
+
+        Ok(ordered_hooks)
     }
 
     /// Analyze hooks and group them by environment requirements

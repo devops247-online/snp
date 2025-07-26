@@ -262,7 +262,7 @@ pub fn filter_files_for_hook(hook: &Hook, files: &[PathBuf]) -> Result<Vec<PathB
 }
 
 /// Get hooks for a specific stage from configuration
-fn get_hooks_for_stage(config: &Config, stage: &Stage) -> Result<Vec<Hook>> {
+pub fn get_hooks_for_stage(config: &Config, stage: &Stage) -> Result<Vec<Hook>> {
     let mut hooks = Vec::new();
 
     for repo in &config.repos {

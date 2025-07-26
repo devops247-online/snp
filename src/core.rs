@@ -476,6 +476,10 @@ impl Hook {
             hook = hook.with_args(args.clone());
         }
 
+        if let Some(depends_on) = &config_hook.depends_on {
+            hook = hook.with_depends_on(depends_on.clone());
+        }
+
         Ok(hook)
     }
 }

@@ -223,12 +223,135 @@ impl TaskDependencyGraph {
     }
 
     pub fn resolve_execution_order(&self) -> Result<Vec<String>> {
-        // TODO: Implement topological sort
-        Ok(self.tasks.keys().cloned().collect())
+        // Implement Kahn's algorithm for topological sorting
+        let mut in_degree: HashMap<String, usize> = HashMap::new();
+        let mut adjacency_list: HashMap<String, Vec<String>> = HashMap::new();
+
+        // Initialize in-degree count and build adjacency list
+        for task_id in self.tasks.keys() {
+            in_degree.insert(task_id.clone(), 0);
+            adjacency_list.insert(task_id.clone(), Vec::new());
+        }
+
+        // Build the dependency graph (reverse edges for topological sort)
+        for (dependent_task, dependencies) in &self.edges {
+            for dependency in dependencies {
+                // Check if dependency exists
+                if !self.tasks.contains_key(dependency) {
+                    return Err(SnpError::Process(Box::new(crate::ProcessError::ExecutionFailed {
+                        command: format!("Invalid dependency: {dependent_task} -> {dependency}"),
+                        exit_code: None,
+                        stderr: format!("Hook '{dependent_task}' depends on '{dependency}' which does not exist"),
+                    })));
+                }
+
+                // Add edge from dependency to dependent task
+                adjacency_list
+                    .get_mut(dependency)
+                    .unwrap()
+                    .push(dependent_task.clone());
+                // Increment in-degree of dependent task
+                *in_degree.get_mut(dependent_task).unwrap() += 1;
+            }
+        }
+
+        // Find all tasks with no incoming edges
+        let mut queue: std::collections::VecDeque<String> = in_degree
+            .iter()
+            .filter(|(_, &degree)| degree == 0)
+            .map(|(task, _)| task.clone())
+            .collect();
+
+        let mut result = Vec::new();
+
+        // Process tasks in topological order
+        while let Some(current_task) = queue.pop_front() {
+            result.push(current_task.clone());
+
+            // For each task that depends on the current task
+            if let Some(dependents) = adjacency_list.get(&current_task) {
+                for dependent in dependents {
+                    // Decrease in-degree
+                    let new_degree = in_degree.get_mut(dependent).unwrap();
+                    *new_degree -= 1;
+
+                    // If in-degree becomes 0, add to queue
+                    if *new_degree == 0 {
+                        queue.push_back(dependent.clone());
+                    }
+                }
+            }
+        }
+
+        // Check if all tasks were processed (no cycles)
+        if result.len() != self.tasks.len() {
+            return Err(SnpError::Process(Box::new(
+                crate::ProcessError::ExecutionFailed {
+                    command: "Dependency resolution".to_string(),
+                    exit_code: None,
+                    stderr: "Circular dependency detected in hook dependencies".to_string(),
+                },
+            )));
+        }
+
+        Ok(result)
     }
 
     pub fn detect_cycles(&self) -> Result<()> {
-        // TODO: Implement cycle detection
+        // Use DFS-based cycle detection for more detailed cycle information
+        let mut visited = HashMap::new();
+        let mut recursion_stack = HashMap::new();
+
+        // Initialize all tasks as unvisited
+        for task_id in self.tasks.keys() {
+            visited.insert(task_id.clone(), false);
+            recursion_stack.insert(task_id.clone(), false);
+        }
+
+        // Check each task for cycles
+        for task_id in self.tasks.keys() {
+            if !visited[task_id] {
+                self.dfs_cycle_check(task_id, &mut visited, &mut recursion_stack)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn dfs_cycle_check(
+        &self,
+        task_id: &str,
+        visited: &mut HashMap<String, bool>,
+        recursion_stack: &mut HashMap<String, bool>,
+    ) -> Result<()> {
+        // Mark current task as visited and add to recursion stack
+        visited.insert(task_id.to_string(), true);
+        recursion_stack.insert(task_id.to_string(), true);
+
+        // Check all dependencies of current task
+        if let Some(dependencies) = self.edges.get(task_id) {
+            for dependency in dependencies {
+                // If dependency is not visited, recursively check it
+                if !visited.get(dependency).unwrap_or(&false) {
+                    self.dfs_cycle_check(dependency, visited, recursion_stack)?;
+                }
+                // If dependency is in recursion stack, we found a cycle
+                else if *recursion_stack.get(dependency).unwrap_or(&false) {
+                    return Err(SnpError::Process(Box::new(
+                        crate::ProcessError::ExecutionFailed {
+                            command: "Cycle detection".to_string(),
+                            exit_code: None,
+                            stderr: format!(
+                            "Circular dependency detected: '{task_id}' -> '{dependency}' (and back)"
+                        ),
+                        },
+                    )));
+                }
+            }
+        }
+
+        // Remove current task from recursion stack
+        recursion_stack.insert(task_id.to_string(), false);
         Ok(())
     }
 }

@@ -46,6 +46,7 @@ pub struct Hook {
     pub pass_filenames: Option<bool>,
     pub stages: Option<Vec<String>>,
     pub verbose: Option<bool>,
+    pub depends_on: Option<Vec<String>>,
 }
 
 impl Config {
@@ -433,6 +434,15 @@ impl Config {
                             .collect()
                     }),
                 verbose: hook_def.get("verbose").and_then(|v| v.as_bool()),
+                depends_on: hook_def
+                    .get("depends_on")
+                    .and_then(|v| v.as_sequence())
+                    .map(|seq| {
+                        seq.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .collect()
+                    }),
             };
 
             hooks_map.insert(hook_id.to_string(), hook);

@@ -80,6 +80,10 @@ pub enum Commands {
         /// Fail fast - stop running hooks after first failure
         #[arg(long)]
         fail_fast: bool,
+
+        /// Show hook dependencies and execution order
+        #[arg(long)]
+        show_deps: bool,
     },
 
     /// Install the pre-commit script
@@ -265,6 +269,7 @@ impl Cli {
                 fail_fast,
                 show_diff_on_failure: _,
                 hook_stage,
+                show_deps,
             }) => {
                 // Validate run command arguments
                 if *all_files && !files.is_empty() {
@@ -311,7 +316,7 @@ impl Cli {
                 })?;
 
                 // Create execution configuration
-                let mut execution_config = ExecutionConfig::new(stage)
+                let mut execution_config = ExecutionConfig::new(stage.clone())
                     .with_verbose(*verbose || self.verbose)
                     .with_fail_fast(*fail_fast)
                     .with_hook_timeout(Duration::from_secs(60))
@@ -320,6 +325,13 @@ impl Cli {
                 // Set parallel execution if jobs flag is provided
                 if let Some(max_jobs) = jobs {
                     execution_config = execution_config.with_max_parallel_hooks(*max_jobs);
+                }
+
+                // If --show-deps is requested, display dependencies and return
+                if *show_deps {
+                    return self
+                        .show_hook_dependencies(&repo_path, &stage, hook.as_deref())
+                        .await;
                 }
 
                 // Execute based on command type
@@ -723,6 +735,91 @@ impl Cli {
             eprintln!("Failed to initialize logging: {e}");
             // Continue execution even if logging fails
         }
+    }
+
+    /// Display hook dependencies and execution order
+    async fn show_hook_dependencies(
+        &self,
+        repo_path: &std::path::Path,
+        stage: &crate::core::Stage,
+        hook_filter: Option<&str>,
+    ) -> Result<i32> {
+        use crate::commands::run::get_hooks_for_stage;
+        use crate::config::Config;
+        use crate::core::Hook;
+
+        // Load configuration
+        let config_path = repo_path.join(&self.config);
+        let config = Config::from_file_with_resolved_hooks(&config_path).await?;
+
+        // Get hooks for the specified stage
+        let hooks = get_hooks_for_stage(&config, stage)?;
+
+        // Filter to specific hook if requested
+        let filtered_hooks: Vec<Hook> = if let Some(hook_id) = hook_filter {
+            hooks
+                .into_iter()
+                .filter(|hook| hook.id == hook_id)
+                .collect()
+        } else {
+            hooks
+        };
+
+        if filtered_hooks.is_empty() {
+            if let Some(hook_id) = hook_filter {
+                eprintln!("Hook '{hook_id}' not found for stage '{stage:?}'");
+            } else {
+                eprintln!("No hooks found for stage '{stage:?}'");
+            }
+            return Ok(1);
+        }
+
+        // Resolve dependencies and get execution order
+        let execution_engine = crate::execution::HookExecutionEngine::new(
+            std::sync::Arc::new(crate::process::ProcessManager::new()),
+            std::sync::Arc::new(crate::storage::Store::new()?),
+        );
+
+        let ordered_hooks = execution_engine.resolve_hook_dependencies(&filtered_hooks)?;
+
+        // Display dependency information
+        println!("Hook Dependencies and Execution Order:");
+        println!("=====================================");
+
+        for (index, hook) in ordered_hooks.iter().enumerate() {
+            println!(
+                "\n{}. {} ({})",
+                index + 1,
+                hook.id,
+                hook.name.as_deref().unwrap_or("")
+            );
+
+            if hook.depends_on.is_empty() {
+                println!("   Dependencies: None");
+            } else {
+                println!("   Dependencies: {}", hook.depends_on.join(", "));
+            }
+
+            println!("   Language: {}", hook.language);
+            println!("   Entry: {}", hook.entry);
+        }
+
+        // Show execution summary
+        println!("\nExecution Summary:");
+        println!("==================");
+        let has_dependencies = filtered_hooks
+            .iter()
+            .any(|hook| !hook.depends_on.is_empty());
+
+        if has_dependencies {
+            println!("• Hooks will be executed sequentially due to dependencies");
+            println!("• Total execution order: {} hooks", ordered_hooks.len());
+        } else {
+            println!("• No dependencies found - hooks can run in parallel");
+            println!("• Total hooks: {}", ordered_hooks.len());
+        }
+
+        Ok(0)
     }
 }
 
