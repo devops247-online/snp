@@ -15,10 +15,13 @@ use snp::config::Config;
 #[tokio::test]
 #[serial]
 async fn test_sample_config_generation() {
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join(".pre-commit-config.yaml");
+
     let config = SampleConfigConfig {
         language: None,
         hook_type: None,
-        output_file: None,
+        output_file: Some(config_path),
     };
 
     let result = execute_sample_config_command(&config).await;
@@ -32,7 +35,7 @@ async fn test_sample_config_generation() {
     assert!(sample_result
         .config_generated
         .contains("trailing-whitespace"));
-    assert!(sample_result.output_location == "stdout");
+    assert!(sample_result.language_detected.is_none());
 }
 
 #[tokio::test]
@@ -58,10 +61,13 @@ async fn test_language_specific_config() {
 #[tokio::test]
 #[serial]
 async fn test_hook_type_specific_config() {
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join(".pre-commit-config.yaml");
+
     let config = SampleConfigConfig {
         language: None,
         hook_type: Some("pre-push".to_string()),
-        output_file: None,
+        output_file: Some(config_path),
     };
 
     let result = execute_sample_config_command(&config).await;
@@ -102,10 +108,13 @@ async fn test_project_language_detection() {
 #[tokio::test]
 #[serial]
 async fn test_config_template_validation() {
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join(".pre-commit-config.yaml");
+
     let config = SampleConfigConfig {
         language: None,
         hook_type: None,
-        output_file: None,
+        output_file: Some(config_path),
     };
 
     let result = execute_sample_config_command(&config).await;

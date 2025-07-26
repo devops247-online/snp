@@ -128,6 +128,7 @@ mod tests {
     #[test]
     fn test_description_exists() {
         // DESCRIPTION is a const string that's never empty
-        assert!(DESCRIPTION.contains("Shell Not Pass"));
+        assert!(DESCRIPTION.contains("pre-commit framework"));
+        assert!(DESCRIPTION.contains("Rust"));
     }
 }
