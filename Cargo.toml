@@ -93,7 +93,7 @@ rayon = "1.7"
 num_cpus = "1.16"
 
 # System monitoring
-sysinfo = "0.30"
+sysinfo = "0.36"
 whoami = "1.4"
 uuid = { version = "1.6", features = ["v4"] }
 
