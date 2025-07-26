@@ -79,8 +79,8 @@ updates:
       prefix: "deps"
       prefix-development: "deps-dev"
       include: "scope"
-    # Only update dependencies that are actually used
-    versioning-strategy: "increase"
+    # Auto-detect versioning strategy
+    versioning-strategy: "auto"
     # Allow Dependabot to resolve conflicts automatically when possible
     allow:
       - dependency-type: "direct"
