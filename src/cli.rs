@@ -223,6 +223,9 @@ pub enum Commands {
         /// Shell to generate completion for
         shell: Shell,
     },
+
+    /// Show version with build information
+    Version,
 }
 
 impl Cli {
@@ -557,6 +560,10 @@ impl Cli {
                 let mut cmd = Self::command();
                 let name = cmd.get_name().to_string();
                 generate(*shell, &mut cmd, name, &mut std::io::stdout());
+                Ok(0)
+            }
+            Some(Commands::Version) => {
+                println!("{}", crate::version_info());
                 Ok(0)
             }
             Some(Commands::Autoupdate {

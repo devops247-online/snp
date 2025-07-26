@@ -3,11 +3,38 @@ name = "snp"
 version = "0.1.0"
 edition = "2021"
 authors = ["SNP Contributors"]
-description = "SNP (Shell Not Pass) - A fast, reliable pre-commit framework written in Rust"
+description = "A fast, reliable pre-commit framework written in Rust with 100% Python pre-commit compatibility"
 repository = "https://github.com/devops247-online/snp"
+homepage = "https://github.com/devops247-online/snp"
+documentation = "https://docs.rs/snp"
+readme = "README.md"
 license = "MIT"
-keywords = ["git", "hooks", "pre-commit", "cli"]
+keywords = ["git", "hooks", "pre-commit", "cli", "development"]
 categories = ["command-line-utilities", "development-tools"]
+include = [
+    "src/**/*",
+    "build.rs",
+    "Cargo.toml",
+    "Cargo.lock",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+]
+exclude = [
+    "target/",
+    ".github/",
+    "tests/",
+    "benches/",
+    "scripts/",
+    "snp.wiki/",
+    "wiki-content/",
+    "test_output.log",
+    "custom-config.yaml",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [[bin]]
 name = "snp"
@@ -137,6 +164,11 @@ predicates = "3.0"
 tempfile = "3.8"
 criterion = { version = "0.5", features = ["html_reports"] }
 serial_test = "3.0"
+# Release management
+cargo-release = "0.25"
+
+[build-dependencies]
+chrono = "0.4"
 
 [profile.release]
 strip = true
@@ -162,3 +194,18 @@ harness = false
 [[bench]]
 name = "logging_benchmark"
 harness = false
+
+# Cargo-release configuration
+[package.metadata.release]
+# Enable all release steps
+pre-release-replacements = [
+  {file="CHANGELOG.md", search="## \\[Unreleased\\]", replace="## [Unreleased]\n\n## [{{version}}] - {{date}}", exactly=1},
+]
+pre-release-commit-message = "Release {{version}}"
+tag-message = "Release {{version}}"
+tag-name = "v{{version}}"
+# Don't publish to crates.io automatically
+publish = false
+# Enable git operations
+tag = true
+push = false  # Manual push for safety

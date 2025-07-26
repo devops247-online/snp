@@ -98,6 +98,19 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const NAME: &str = env!("CARGO_PKG_NAME");
 pub const DESCRIPTION: &str = env!("CARGO_PKG_DESCRIPTION");
 
+// Build information (set by build script)
+pub const BUILD_DATE: &str = env!("BUILD_DATE");
+pub const GIT_COMMIT: &str = env!("GIT_COMMIT");
+pub const GIT_BRANCH: &str = env!("GIT_BRANCH");
+pub const RUST_VERSION: &str = env!("RUST_VERSION");
+
+/// Get formatted version string with build information
+pub fn version_info() -> String {
+    format!(
+        "{NAME} {VERSION} (commit: {GIT_COMMIT}, branch: {GIT_BRANCH}, built: {BUILD_DATE}, rustc: {RUST_VERSION})"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
