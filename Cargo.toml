@@ -85,7 +85,7 @@ futures = "0.3"
 dirs = "6.0"          # Home directory discovery for CARGO_HOME/RUSTUP_HOME
 
 # Python language support dependencies
-pep440_rs = "0.6"        # PEP 440 version specifier parsing
+pep440_rs = "0.7"        # PEP 440 version specifier parsing
 
 # Concurrency and performance
 crossbeam = "0.8"
