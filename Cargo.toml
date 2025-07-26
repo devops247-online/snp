@@ -114,7 +114,7 @@ url = "2.4"
 urlencoding = "2.1"
 
 # Database storage
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
 
 # Schema validation dependencies
 validator = "0.20"
