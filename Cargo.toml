@@ -57,7 +57,7 @@ similar = "2.3"
 # Regex processing dependencies
 aho-corasick = "1.1"
 memchr = "2.6"
-fancy-regex = "0.11"
+fancy-regex = "0.15"
 regex-automata = "0.4"
 
 # Performance optimization
