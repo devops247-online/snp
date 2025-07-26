@@ -69,6 +69,10 @@ pub enum Commands {
         #[arg(long)]
         to_ref: Option<String>,
 
+        /// Number of concurrent hook processes to run (default: number of CPU cores)
+        #[arg(short = 'j', long, value_name = "N")]
+        jobs: Option<usize>,
+
         /// Enable verbose output
         #[arg(short, long)]
         verbose: bool,
@@ -256,6 +260,7 @@ impl Cli {
                 files,
                 from_ref,
                 to_ref,
+                jobs,
                 verbose,
                 fail_fast,
                 show_diff_on_failure: _,
@@ -311,6 +316,11 @@ impl Cli {
                     .with_fail_fast(*fail_fast)
                     .with_hook_timeout(Duration::from_secs(60))
                     .with_user_output(user_output.clone());
+
+                // Set parallel execution if jobs flag is provided
+                if let Some(max_jobs) = jobs {
+                    execution_config = execution_config.with_max_parallel_hooks(*max_jobs);
+                }
 
                 // Execute based on command type
                 let execution_result = if let Some(hook_id) = hook {

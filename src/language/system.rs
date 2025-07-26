@@ -519,6 +519,7 @@ impl SystemLanguagePlugin {
                         hook_id: "system".to_string(),
                         success: false,
                         skipped: false,
+                        skip_reason: None,
                         exit_code: None,
                         duration,
                         files_processed: vec![],
@@ -554,6 +555,7 @@ impl SystemLanguagePlugin {
             hook_id: "system".to_string(), // Will be overridden by caller
             success: output.status.success(),
             skipped: false,
+            skip_reason: None,
             exit_code: output.status.code(),
             duration,
             files_processed: vec![], // Will be set by caller

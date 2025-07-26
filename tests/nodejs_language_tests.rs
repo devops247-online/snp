@@ -332,6 +332,7 @@ async fn test_nodejs_hook_execution() {
         stages: vec![snp::core::Stage::PreCommit],
         verbose: false,
         minimum_pre_commit_version: None,
+        depends_on: vec![],
     };
 
     // Test hook execution
@@ -489,6 +490,7 @@ async fn test_command_construction() {
         stages: vec![snp::core::Stage::PreCommit],
         verbose: false,
         minimum_pre_commit_version: None,
+        depends_on: vec![],
     };
 
     let files = vec![PathBuf::from("src/main.js"), PathBuf::from("src/utils.js")];

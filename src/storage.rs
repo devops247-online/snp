@@ -578,7 +578,7 @@ impl Store {
     // =============================================================================
 
     /// Clone a repository and store it in the cache
-    pub fn clone_repository(
+    pub async fn clone_repository(
         &self,
         url: &str,
         revision: &str,
@@ -635,10 +635,59 @@ impl Store {
             })?;
         }
 
-        // Clone the repository using git2 (this will create the directory)
+        // Clone the repository using git2 (wrapped in spawn_blocking to avoid blocking async runtime)
         debug!("Cloning repository {} to {}", url, repo_dir.display());
-        let mut builder = git2::build::RepoBuilder::new();
-        let git_repo = builder.clone(url, &repo_dir).map_err(|e| {
+        let url_clone = url.to_string();
+        let revision_clone = revision.to_string();
+        let repo_dir_clone = repo_dir.clone();
+
+        let git_repo = tokio::task::spawn_blocking(move || {
+            let mut builder = git2::build::RepoBuilder::new();
+
+            // Add optimization settings for faster clones
+            let mut callbacks = git2::RemoteCallbacks::new();
+            callbacks.pack_progress(|stage, current, total| match stage {
+                git2::PackBuilderStage::AddingObjects => {
+                    debug!("Adding objects: {}/{}", current, total);
+                }
+                git2::PackBuilderStage::Deltafication => {
+                    debug!("Deltafication: {}/{}", current, total);
+                }
+            });
+
+            // Configure for optimal performance
+            let mut fetch_options = git2::FetchOptions::new();
+            fetch_options.remote_callbacks(callbacks);
+
+            // For specific revisions (not HEAD), we can use shallow clone for better performance
+            if revision_clone != "HEAD" {
+                // Use depth=1 for shallow clone when cloning a specific revision
+                // This significantly reduces clone time and bandwidth
+                fetch_options.depth(1);
+            }
+
+            builder.fetch_options(fetch_options);
+
+            // Set checkout options for better performance
+            let mut checkout_opts = git2::build::CheckoutBuilder::new();
+            checkout_opts.progress(|path, cur, total| {
+                if let Some(path) = path {
+                    debug!("Checkout progress: {}/{} - {:?}", cur, total, path);
+                }
+            });
+            builder.with_checkout(checkout_opts);
+
+            builder.clone(&url_clone, &repo_dir_clone)
+        })
+        .await
+        .map_err(|e| {
+            SnpError::Storage(Box::new(StorageError::ConcurrencyConflict {
+                operation: "git_clone".to_string(),
+                error: format!("Task execution error: {e}"),
+                retry_suggested: true,
+            }))
+        })?
+        .map_err(|e| {
             error!(
                 "Failed to clone repository {} to {}: {}",
                 url,
@@ -651,42 +700,60 @@ impl Store {
             }))
         })?;
 
-        // Checkout specific revision if requested and not HEAD
+        // Checkout specific revision if requested and not HEAD (also wrapped in spawn_blocking)
         if revision != "HEAD" {
             debug!("Checking out revision: {}", revision);
+            let revision_clone = revision.to_string();
+            let repo_dir_clone = repo_dir.clone();
 
-            // Try to resolve and checkout the revision
-            match git_repo.revparse_single(revision) {
-                Ok(obj) => {
-                    debug!("Found revision object: {}", obj.id());
-                    git_repo.checkout_tree(&obj, None).map_err(|e| {
-                        SnpError::Storage(Box::new(StorageError::CacheDirectoryFailed {
-                            path: repo_dir.clone(),
-                            error: format!(
-                                "Failed to checkout revision '{}': {}",
-                                revision,
-                                e.message()
-                            ),
-                        }))
-                    })?;
+            tokio::task::spawn_blocking(move || {
+                // Try to resolve and checkout the revision
+                match git_repo.revparse_single(&revision_clone) {
+                    Ok(obj) => {
+                        debug!("Found revision object: {}", obj.id());
+                        git_repo.checkout_tree(&obj, None).map_err(|e| {
+                            SnpError::Storage(Box::new(StorageError::CacheDirectoryFailed {
+                                path: repo_dir_clone.clone(),
+                                error: format!(
+                                    "Failed to checkout revision '{}': {}",
+                                    revision_clone,
+                                    e.message()
+                                ),
+                            }))
+                        })?;
 
-                    // Set HEAD to the checked out revision
-                    git_repo.set_head_detached(obj.id()).map_err(|e| {
-                        SnpError::Storage(Box::new(StorageError::CacheDirectoryFailed {
-                            path: repo_dir.clone(),
-                            error: format!(
-                                "Failed to set HEAD to revision '{}': {}",
-                                revision,
-                                e.message()
-                            ),
-                        }))
-                    })?;
+                        // Set HEAD to the checked out revision
+                        git_repo.set_head_detached(obj.id()).map_err(|e| {
+                            SnpError::Storage(Box::new(StorageError::CacheDirectoryFailed {
+                                path: repo_dir_clone,
+                                error: format!(
+                                    "Failed to set HEAD to revision '{}': {}",
+                                    revision_clone,
+                                    e.message()
+                                ),
+                            }))
+                        })?;
+                        Ok::<(), crate::error::SnpError>(())
+                    }
+                    Err(e) => {
+                        debug!(
+                            "Could not resolve revision '{}': {}",
+                            revision_clone,
+                            e.message()
+                        );
+                        // Continue with HEAD if revision can't be resolved
+                        Ok::<(), crate::error::SnpError>(())
+                    }
                 }
-                Err(e) => {
-                    debug!("Could not resolve revision '{}': {}", revision, e.message());
-                    // Continue with HEAD if revision can't be resolved
-                }
-            }
+            })
+            .await
+            .map_err(|e| {
+                SnpError::Storage(Box::new(StorageError::ConcurrencyConflict {
+                    operation: "git_checkout".to_string(),
+                    error: format!("Task execution error: {e}"),
+                    retry_suggested: true,
+                }))
+            })??;
         }
 
         // Create marker file for tracking
@@ -700,15 +767,31 @@ impl Store {
             }))
         })?;
 
-        // Store in database
-        let connection = self.connection.lock().unwrap();
-        let now = Self::system_time_to_timestamp(SystemTime::now());
-        let deps_json = Self::serialize_dependencies(dependencies);
+        // Store in database (wrapped in spawn_blocking for better concurrency)
+        let url_clone = url.to_string();
+        let revision_clone = revision.to_string();
+        let repo_dir_clone = repo_dir.clone();
+        let deps_clone = dependencies.to_vec();
+        let connection = Arc::clone(&self.connection);
 
-        connection.execute(
-            "INSERT INTO repositories (url, revision, path, dependencies, last_used) VALUES (?, ?, ?, ?, ?)",
-            params![url, revision, repo_dir.to_string_lossy().as_ref(), deps_json, now],
-        )?;
+        tokio::task::spawn_blocking(move || {
+            let connection = connection.lock().unwrap();
+            let now = Self::system_time_to_timestamp(SystemTime::now());
+            let deps_json = Self::serialize_dependencies(&deps_clone);
+
+            connection.execute(
+                "INSERT INTO repositories (url, revision, path, dependencies, last_used) VALUES (?, ?, ?, ?, ?)",
+                params![url_clone, revision_clone, repo_dir_clone.to_string_lossy().as_ref(), deps_json, now],
+            )
+        })
+        .await
+        .map_err(|e| {
+            SnpError::Storage(Box::new(StorageError::ConcurrencyConflict {
+                operation: "database_insert".to_string(),
+                error: format!("Task execution error: {e}"),
+                retry_suggested: true,
+            }))
+        })??;
 
         Ok(repo_dir)
     }

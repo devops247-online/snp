@@ -226,6 +226,7 @@ async fn test_python_hook_execution() {
         fail_fast: false,
         pass_filenames: false,
         minimum_pre_commit_version: None,
+        depends_on: vec![],
         verbose: false,
         stages: vec![],
     };
@@ -254,6 +255,7 @@ async fn test_python_hook_execution() {
         fail_fast: false,
         pass_filenames: true,
         minimum_pre_commit_version: None,
+        depends_on: vec![],
         verbose: false,
         stages: vec![],
     };

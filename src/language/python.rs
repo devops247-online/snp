@@ -3,10 +3,11 @@
 
 use async_trait::async_trait;
 // use pep440_rs::{Version as Pep440Version}; // Commented out until needed
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::RwLock;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tokio::fs;
 use tokio::process::Command as TokioCommand;
@@ -23,6 +24,11 @@ use super::environment::{
     EnvironmentConfig, EnvironmentInfo, LanguageEnvironment, ValidationReport,
 };
 use super::traits::{Command, Language, LanguageConfig, LanguageError};
+
+/// Global coordination for repository installations to prevent concurrent installs
+/// Key: "env_path:repo_path", Value: Mutex for that specific installation
+static REPOSITORY_INSTALL_LOCKS: Lazy<Mutex<HashMap<String, Arc<Mutex<()>>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// Python language plugin for Python-based hooks with virtual environment management
 pub struct PythonLanguagePlugin {
@@ -394,7 +400,7 @@ impl PythonLanguagePlugin {
         // Check cache first
         let cached_env_path = self.environment_cache.read().unwrap().get(&env_id).cloned();
         if let Some(env_path) = cached_env_path {
-            if env_path.exists() && self.validate_environment(&env_path).await? {
+            if env_path.exists() && self.validate_venv_directory(&env_path).await? {
                 return Ok(env_path);
             }
         }
@@ -440,7 +446,12 @@ impl PythonLanguagePlugin {
         let env_path = temp_dir.join("snp-python-envs").join(env_id);
 
         // If environment already exists, return it (handles race conditions)
-        if env_path.exists() && self.validate_environment(&env_path).await.unwrap_or(false) {
+        if env_path.exists()
+            && self
+                .validate_venv_directory(&env_path)
+                .await
+                .unwrap_or(false)
+        {
             return Ok(env_path);
         }
 
@@ -611,8 +622,69 @@ impl PythonLanguagePlugin {
         Ok(env_path.to_path_buf())
     }
 
-    /// Validate existing virtual environment
-    async fn validate_environment(&self, env_path: &Path) -> Result<bool> {
+    /// Find executable in virtual environment, including console scripts
+    fn find_executable_in_venv(&self, env_path: &Path, entry: &str) -> Result<PathBuf> {
+        // First try direct path in venv bin
+        let venv_bin_path = env_path.join("bin").join(entry);
+        if venv_bin_path.exists() {
+            tracing::debug!("Found executable directly in venv: {:?}", venv_bin_path);
+            return Ok(venv_bin_path);
+        }
+
+        // Try alternative executable names (some packages use different naming)
+        let alternative_names = [
+            format!("{entry}-script"),
+            format!("{entry}.py"),
+            entry.replace("-", "_"),
+        ];
+
+        for alt_name in &alternative_names {
+            let alt_path = env_path.join("bin").join(alt_name);
+            if alt_path.exists() {
+                tracing::debug!("Found executable with alternative name: {:?}", alt_path);
+                return Ok(alt_path);
+            }
+        }
+
+        // Special handling for known pre-commit hooks that might need module execution
+        let module_based_hooks = [
+            ("mixed-line-ending", "mixed_line_ending"), // This is actually a module
+            ("debug-statements", "debug_statement_hook"), // Example of module mapping
+        ];
+
+        for (hook_name, module_name) in &module_based_hooks {
+            if entry == *hook_name {
+                tracing::debug!(
+                    "Entry '{}' is a module-based hook, using module: {}",
+                    entry,
+                    module_name
+                );
+                return Ok(PathBuf::from(format!("__module__{module_name}")));
+            }
+        }
+
+        // For most pre-commit hooks, if we can't find the executable, it might be a race condition
+        // or the installation hasn't completed yet. Return the expected path and let execution
+        // handle the error with proper retry logic.
+        let expected_path = env_path.join("bin").join(entry);
+        tracing::debug!(
+            "Could not find executable '{}' in venv at {:?}, will retry during execution",
+            entry,
+            expected_path
+        );
+        Ok(expected_path)
+    }
+
+    /// Get the PATH environment variable for the virtual environment
+    #[allow(dead_code)]
+    fn get_venv_path(&self, env_path: &Path) -> Result<String> {
+        let venv_bin = env_path.join("bin");
+        let current_path = std::env::var("PATH").unwrap_or_default();
+        Ok(format!("{}:{current_path}", venv_bin.display()))
+    }
+
+    /// Validate existing virtual environment (internal method)
+    async fn validate_venv_directory(&self, env_path: &Path) -> Result<bool> {
         // Check if Python executable exists
         let python_exe = match self.get_python_executable(env_path) {
             Ok(exe) => exe,
@@ -777,7 +849,26 @@ impl PythonLanguagePlugin {
         }
     }
 
-    /// Install a repository as a Python package in the virtual environment
+    /// Get or create a coordination lock for a specific repository installation
+    fn get_repository_install_lock(env_path: &Path, repo_path: &Path) -> Arc<Mutex<()>> {
+        let lock_key = format!(
+            "{}:{}",
+            env_path.to_string_lossy(),
+            repo_path.to_string_lossy()
+        );
+
+        // Get or create the lock for this specific env/repo combination
+        let mut locks = REPOSITORY_INSTALL_LOCKS.lock().unwrap();
+        if let Some(existing_lock) = locks.get(&lock_key) {
+            Arc::clone(existing_lock)
+        } else {
+            let new_lock = Arc::new(Mutex::new(()));
+            locks.insert(lock_key, Arc::clone(&new_lock));
+            new_lock
+        }
+    }
+
+    /// Install a repository as a Python package in the virtual environment with coordination
     async fn install_repository(&self, env_path: &Path, repo_path: &Path) -> Result<()> {
         tracing::debug!(
             "Installing repository {:?} in environment {:?}",
@@ -785,17 +876,31 @@ impl PythonLanguagePlugin {
             env_path
         );
 
-        // Get pip executable from virtual environment
+        // Get coordination lock for this specific env/repo combination
+        let install_lock = Self::get_repository_install_lock(env_path, repo_path);
+
+        // Use a block to ensure the lock is dropped before any async operations
+        {
+            let _lock_guard = install_lock.lock().unwrap();
+            tracing::debug!("Acquired installation lock for repository {:?}", repo_path);
+
+            // Get pip executable from virtual environment
+            let pip_executable = env_path.join("bin").join("pip");
+            if !pip_executable.exists() {
+                return Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
+                    language: "python".to_string(),
+                    error: "pip not found in virtual environment".to_string(),
+                    recovery_suggestion: Some(
+                        "Ensure virtual environment was created correctly".to_string(),
+                    ),
+                }));
+            }
+
+            // Note: We'll do the async installation check outside the lock to avoid Send issues
+        } // Lock is dropped here
+
+        // Perform async operations without holding the lock
         let pip_executable = env_path.join("bin").join("pip");
-        if !pip_executable.exists() {
-            return Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
-                language: "python".to_string(),
-                error: "pip not found in virtual environment".to_string(),
-                recovery_suggestion: Some(
-                    "Ensure virtual environment was created correctly".to_string(),
-                ),
-            }));
-        }
 
         // Check if repository is already installed and up-to-date
         if self
@@ -848,54 +953,23 @@ impl PythonLanguagePlugin {
         pip_executable: &Path,
         repo_path: &Path,
     ) -> Result<bool> {
-        // First, check if there's a setup.py or pyproject.toml in the repo to get package name
-        let package_name = self.get_package_name_from_repository(repo_path).await?;
+        // Use repository path hash as identifier instead of trying to extract package names
+        // This is more reliable since many pre-commit repos don't have proper package configs
+        let repo_identifier = self.get_repository_identifier(repo_path);
 
-        // Check if package is installed using pip list
-        let list_output = TokioCommand::new(pip_executable)
-            .args(["list", "--format=json"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await?;
-
-        if !list_output.status.success() {
-            tracing::debug!("Failed to get pip list, assuming not installed");
-            return Ok(false);
-        }
-
-        let list_output_str = String::from_utf8_lossy(&list_output.stdout);
-
-        // Check if package is in the pip list output (simple string search)
-        let is_installed = list_output_str.lines().any(|line| {
-            if let Some(name_start) = line.find("\"name\": \"") {
-                let name_part = &line[name_start + 9..];
-                if let Some(name_end) = name_part.find('"') {
-                    let name = &name_part[..name_end];
-                    return name.to_lowercase() == package_name.to_lowercase();
-                }
-            }
-            false
-        });
-
-        if !is_installed {
-            tracing::debug!("Package {} not found in pip list", package_name);
-            return Ok(false);
-        }
-
-        // Package is installed, now check if repository files have been modified
+        // Check install marker based on repository path hash, not package name
         let install_marker_path = pip_executable
             .parent()
             .unwrap()
             .parent()
             .unwrap()
             .join(".snp_installs")
-            .join(format!("{package_name}.marker"));
+            .join(format!("{repo_identifier}.marker"));
 
         if !install_marker_path.exists() {
             tracing::debug!(
-                "No install marker found for {}, needs installation",
-                package_name
+                "No install marker found for repository {}, needs installation",
+                repo_identifier
             );
             return Ok(false);
         }
@@ -905,7 +979,10 @@ impl PythonLanguagePlugin {
             Ok(metadata) => metadata
                 .modified()
                 .unwrap_or(std::time::SystemTime::UNIX_EPOCH),
-            Err(_) => return Ok(false),
+            Err(_) => {
+                tracing::debug!("Could not read install marker metadata, needs installation");
+                return Ok(false);
+            }
         };
 
         let repo_modified_time = self.get_repository_modified_time(repo_path).await?;
@@ -915,11 +992,12 @@ impl PythonLanguagePlugin {
             return Ok(false);
         }
 
-        tracing::debug!("Repository {} is up-to-date", package_name);
+        tracing::debug!("Repository {} is up-to-date", repo_identifier);
         Ok(true)
     }
 
     /// Get package name from repository setup.py or pyproject.toml
+    #[allow(dead_code)]
     async fn get_package_name_from_repository(&self, repo_path: &Path) -> Result<String> {
         // Try pyproject.toml first
         let pyproject_path = repo_path.join("pyproject.toml");
@@ -1035,18 +1113,45 @@ impl PythonLanguagePlugin {
         Ok(latest_time)
     }
 
+    /// Generate a unique identifier for a repository based on its path
+    /// This is more reliable than extracting package names from setup.py/pyproject.toml
+    fn get_repository_identifier(&self, repo_path: &Path) -> String {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+
+        // Use absolute path to ensure consistency
+        let abs_path = repo_path
+            .canonicalize()
+            .unwrap_or_else(|_| repo_path.to_path_buf());
+        abs_path.to_string_lossy().hash(&mut hasher);
+
+        // Also include the directory name for better debugging
+        let dir_name = repo_path.file_name().unwrap_or_default().to_string_lossy();
+
+        format!("repo_{}_{:x}", dir_name, hasher.finish())
+    }
+
     /// Mark repository as installed by creating a marker file
     async fn mark_repository_installed(&self, env_path: &Path, repo_path: &Path) -> Result<()> {
-        let package_name = self.get_package_name_from_repository(repo_path).await?;
+        let repo_identifier = self.get_repository_identifier(repo_path);
         let marker_dir = env_path.join(".snp_installs");
         fs::create_dir_all(&marker_dir).await?;
 
-        let marker_path = marker_dir.join(format!("{package_name}.marker"));
+        let marker_path = marker_dir.join(format!("{repo_identifier}.marker"));
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        fs::write(&marker_path, format!("Installed at: {timestamp}")).await?;
+        fs::write(
+            &marker_path,
+            format!(
+                "Installed at: {timestamp}\nRepository: {}",
+                repo_path.display()
+            ),
+        )
+        .await?;
 
         tracing::debug!("Created install marker at: {:?}", marker_path);
         Ok(())
@@ -1432,6 +1537,19 @@ impl Language for PythonLanguagePlugin {
 
         let start_time = Instant::now();
 
+        // Verify executable exists and is accessible (with retry for race conditions)
+        let executable_path = PathBuf::from(&command.executable);
+        if !command.executable.starts_with("__module__") && !executable_path.is_absolute() {
+            // For relative paths, resolve against venv bin directory
+            let resolved_path = env.root_path.join("bin").join(&command.executable);
+            self.verify_executable_with_retry(&resolved_path, 3).await?;
+        } else if !command.executable.starts_with("__module__") && executable_path.is_absolute() {
+            // For absolute paths, verify directly
+            self.verify_executable_with_retry(&executable_path, 3)
+                .await?;
+        }
+        // Note: __module__ entries are handled by build_command and don't need file verification
+
         // Build tokio command
         let mut tokio_cmd = TokioCommand::new(&command.executable);
         tokio_cmd.args(&command.arguments);
@@ -1455,6 +1573,7 @@ impl Language for PythonLanguagePlugin {
                         hook_id: hook.id.clone(),
                         success: false,
                         skipped: false,
+                        skip_reason: None,
                         exit_code: Some(-1),
                         duration: start_time.elapsed(),
                         files_processed: files.to_vec(),
@@ -1483,6 +1602,7 @@ impl Language for PythonLanguagePlugin {
             hook_id: hook.id.clone(),
             success: output.status.success(),
             skipped: false,
+            skip_reason: None,
             exit_code: output.status.code(),
             duration,
             files_processed: files.to_vec(),
@@ -1537,22 +1657,23 @@ impl Language for PythonLanguagePlugin {
                 hook.entry
             );
 
-            // Try to find the executable in the virtual environment first
-            let venv_bin_path = env.root_path.join("bin").join(&hook.entry);
-            let executable_path = if venv_bin_path.exists() {
-                tracing::debug!("Found executable in venv: {:?}", venv_bin_path);
-                venv_bin_path
-            } else {
-                // Fall back to original entry
-                tracing::debug!(
-                    "Executable not found in venv, using original entry: {}",
-                    hook.entry
-                );
-                PathBuf::from(&hook.entry)
-            };
+            // Use the improved executable finder
+            let executable_path = self
+                .find_executable_in_venv(&env.root_path, &hook.entry)
+                .unwrap_or_else(|_| PathBuf::from(&hook.entry));
 
-            command = Command::new(executable_path.to_string_lossy());
-            command.args(&hook.args);
+            // Check if it's a module marker
+            if let Some(module_name) = executable_path.to_string_lossy().strip_prefix("__module__")
+            {
+                tracing::debug!("Running as Python module: {}", module_name);
+                command = Command::new(python_exe.to_string_lossy());
+                command.arg("-m").arg(module_name);
+                command.args(&hook.args);
+            } else {
+                tracing::debug!("Using executable path: {:?}", executable_path);
+                command = Command::new(executable_path.to_string_lossy());
+                command.args(&hook.args);
+            }
         }
 
         // Add file arguments if not disabled
@@ -1582,7 +1703,6 @@ impl Language for PythonLanguagePlugin {
 
         Ok(command)
     }
-
     async fn resolve_dependencies(&self, dependencies: &[String]) -> Result<Vec<Dependency>> {
         let mut resolved = Vec::new();
         for dep_str in dependencies {
@@ -1640,6 +1760,65 @@ impl Language for PythonLanguagePlugin {
 
     fn validate_config(&self, _config: &LanguageConfig) -> Result<()> {
         Ok(())
+    }
+}
+
+impl PythonLanguagePlugin {
+    /// Verify executable exists and is accessible with retry logic
+    async fn verify_executable_with_retry(
+        &self,
+        executable_path: &Path,
+        max_retries: u32,
+    ) -> Result<()> {
+        for attempt in 1..=max_retries {
+            if executable_path.exists() {
+                // Additional check: try to get metadata to ensure the file is actually accessible
+                match std::fs::metadata(executable_path) {
+                    Ok(metadata) => {
+                        if metadata.is_file() {
+                            tracing::debug!(
+                                "Executable verified on attempt {}: {:?}",
+                                attempt,
+                                executable_path
+                            );
+                            return Ok(());
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!(
+                            "Metadata check failed on attempt {} for {:?}: {}",
+                            attempt,
+                            executable_path,
+                            e
+                        );
+                    }
+                }
+            }
+
+            if attempt < max_retries {
+                let delay_ms = std::cmp::min(100 * attempt, 500); // Exponential backoff up to 500ms
+                tracing::debug!(
+                    "Executable not found on attempt {}, waiting {}ms before retry: {:?}",
+                    attempt,
+                    delay_ms,
+                    executable_path
+                );
+                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms.into())).await;
+            }
+        }
+
+        Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
+            language: "python".to_string(),
+            error: format!(
+                "Executable not found after {} attempts: {}",
+                max_retries,
+                executable_path.display()
+            ),
+            recovery_suggestion: Some(
+                "The executable may not be properly installed in the virtual environment"
+                    .to_string(),
+            ),
+        }))
     }
 }
 

@@ -221,6 +221,8 @@ pub struct Hook {
     pub verbose: bool,
     /// Minimum version required
     pub minimum_pre_commit_version: Option<String>,
+    /// Hook IDs that this hook depends on (must run before this hook)
+    pub depends_on: Vec<String>,
 }
 
 impl Hook {
@@ -247,6 +249,7 @@ impl Hook {
             stages: vec![Stage::PreCommit], // Default stage
             verbose: false,
             minimum_pre_commit_version: None,
+            depends_on: Vec::new(),
         }
     }
 
@@ -308,6 +311,11 @@ impl Hook {
 
     pub fn with_additional_dependencies(mut self, additional_dependencies: Vec<String>) -> Self {
         self.additional_dependencies = additional_dependencies;
+        self
+    }
+
+    pub fn with_depends_on(mut self, depends_on: Vec<String>) -> Self {
+        self.depends_on = depends_on;
         self
     }
 

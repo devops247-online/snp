@@ -183,6 +183,7 @@ pub struct GitRepository {
     config: GitConfig,
     #[allow(dead_code)]
     index_cache: Option<IndexCache>,
+    file_cache: std::sync::Mutex<HashMap<String, (Vec<PathBuf>, SystemTime)>>,
 }
 
 impl GitRepository {
@@ -231,6 +232,7 @@ impl GitRepository {
             root_path,
             config,
             index_cache: None,
+            file_cache: std::sync::Mutex::new(HashMap::new()),
         })
     }
 
@@ -259,6 +261,7 @@ impl GitRepository {
             root_path,
             config: GitConfig::default(),
             index_cache: None,
+            file_cache: std::sync::Mutex::new(HashMap::new()),
         })
     }
 
@@ -431,6 +434,19 @@ impl GitRepository {
 
     /// Get files staged for commit (for pre-commit hooks)
     pub fn staged_files(&self) -> Result<Vec<PathBuf>> {
+        // Check cache first (with 1 second TTL)
+        const CACHE_TTL: Duration = Duration::from_secs(1);
+        let cache_key = "staged_files";
+
+        if let Ok(cache) = self.file_cache.lock() {
+            if let Some((cached_files, cached_time)) = cache.get(cache_key) {
+                if cached_time.elapsed().unwrap_or(CACHE_TTL) < CACHE_TTL {
+                    debug!("Using cached staged files ({} files)", cached_files.len());
+                    return Ok(cached_files.clone());
+                }
+            }
+        }
+
         debug!("Getting staged files for pre-commit");
 
         let mut status_opts = StatusOptions::new();
@@ -476,11 +492,33 @@ impl GitRepository {
         }
 
         debug!("Found {} staged files", staged_files.len());
+
+        // Update cache
+        if let Ok(mut cache) = self.file_cache.lock() {
+            cache.insert(
+                cache_key.to_string(),
+                (staged_files.clone(), SystemTime::now()),
+            );
+        }
+
         Ok(staged_files)
     }
 
     /// Get all tracked files in the repository
     pub fn all_files(&self) -> Result<Vec<PathBuf>> {
+        // Check cache first (with 10 second TTL for all files since they change less frequently)
+        const CACHE_TTL: Duration = Duration::from_secs(10);
+        let cache_key = "all_files";
+
+        if let Ok(cache) = self.file_cache.lock() {
+            if let Some((cached_files, cached_time)) = cache.get(cache_key) {
+                if cached_time.elapsed().unwrap_or(CACHE_TTL) < CACHE_TTL {
+                    debug!("Using cached all files ({} files)", cached_files.len());
+                    return Ok(cached_files.clone());
+                }
+            }
+        }
+
         debug!("Getting all tracked files");
 
         let index = self.repo.index().map_err(|e| {
@@ -510,6 +548,12 @@ impl GitRepository {
         }
 
         debug!("Found {} tracked files", files.len());
+
+        // Update cache
+        if let Ok(mut cache) = self.file_cache.lock() {
+            cache.insert(cache_key.to_string(), (files.clone(), SystemTime::now()));
+        }
+
         Ok(files)
     }
 

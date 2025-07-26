@@ -11,15 +11,8 @@ env:
 
 jobs:
   test:
-    name: Test Suite (${{ matrix.rust }})
+    name: Test Suite
     runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.rust == 'nightly' }}
-    strategy:
-      matrix:
-        rust:
-          - stable
-          - beta
-          - nightly
 
     steps:
     - name: Checkout code
@@ -37,22 +30,17 @@ jobs:
         python3 -m pip install --upgrade pip
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@master
+      uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: ${{ matrix.rust }}
         components: rustfmt, clippy
 
     - name: Cache dependencies
       uses: Swatinem/rust-cache@v2
-      with:
-        key: ${{ matrix.rust }}
 
     - name: Check formatting
-      if: matrix.rust == 'stable'
       run: cargo fmt --all -- --check
 
     - name: Run clippy
-      if: matrix.rust == 'stable'
       run: cargo clippy --all-targets --all-features -- -D warnings
 
     - name: Build

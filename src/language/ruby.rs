@@ -1136,6 +1136,7 @@ impl Language for RubyLanguagePlugin {
             hook_id: hook.id.clone(),
             success,
             skipped: false,
+            skip_reason: None,
             exit_code: output.status.code(),
             duration,
             files_processed: files.to_vec(),

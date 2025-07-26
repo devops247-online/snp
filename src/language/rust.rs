@@ -1310,6 +1310,7 @@ impl RustHookExecutor {
             hook_id: "rust".to_string(), // Will be set by caller
             success: output.status.success(),
             skipped: false,
+            skip_reason: None,
             exit_code: output.status.code(),
             duration,
             files_processed: vec![], // Will be set by caller

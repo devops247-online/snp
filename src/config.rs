@@ -227,42 +227,91 @@ impl Config {
             e
         })?);
 
-        for (i, repo) in self.repos.iter_mut().enumerate() {
-            tracing::debug!("Processing repository {}: {}", i, repo.repo);
+        // Collect external repositories (skip local and meta)
+        let external_repos: Vec<(usize, &Repository)> = self
+            .repos
+            .iter()
+            .enumerate()
+            .filter(|(_, repo)| repo.repo != "local" && repo.repo != "meta")
+            .collect();
 
-            // Skip local and meta repositories
-            if repo.repo == "local" || repo.repo == "meta" {
-                tracing::debug!("Skipping {} repository", repo.repo);
-                continue;
-            }
+        if external_repos.is_empty() {
+            tracing::debug!("No external repositories to process");
+            return Ok(());
+        }
 
-            // Clone/fetch the external repository
-            tracing::debug!("Cloning repository: {}", repo.repo);
-            let repo_path = store
-                .clone_repository(&repo.repo, repo.rev.as_deref().unwrap_or("HEAD"), &[])
-                .map_err(|e| {
-                    tracing::error!("Failed to clone repository {}: {}", repo.repo, e);
-                    e
-                })?;
+        tracing::debug!(
+            "Processing {} external repositories in parallel",
+            external_repos.len()
+        );
 
-            tracing::debug!("Repository cloned to: {:?}", repo_path);
+        // Clone all repositories in parallel
+        let clone_tasks: Vec<_> = external_repos
+            .iter()
+            .map(|(i, repo)| {
+                let store = Arc::clone(&store);
+                let repo_url = repo.repo.clone();
+                let repo_rev = repo.rev.as_deref().unwrap_or("HEAD").to_string();
+                let repo_index = *i;
 
-            // Load hook definitions from the repository
-            tracing::debug!("Loading hook definitions from: {:?}", repo_path);
-            let hook_definitions = Config::load_repository_hook_definitions_static(&repo_path)
-                .map_err(|e| {
-                    tracing::error!(
-                        "Failed to load hook definitions from {:?}: {}",
-                        repo_path,
+                tokio::spawn(async move {
+                    tracing::debug!("Processing repository {}: {}", repo_index, repo_url);
+
+                    // Clone/fetch the external repository
+                    tracing::debug!("Cloning repository: {}", repo_url);
+                    let repo_path = store
+                        .clone_repository(&repo_url, &repo_rev, &[])
+                        .await
+                        .map_err(|e| {
+                            tracing::error!("Failed to clone repository {}: {}", repo_url, e);
+                            e
+                        })?;
+
+                    tracing::debug!("Repository cloned to: {:?}", repo_path);
+
+                    // Load hook definitions from the repository
+                    tracing::debug!("Loading hook definitions from: {:?}", repo_path);
+                    let hook_definitions = Config::load_repository_hook_definitions_static(
+                        &repo_path,
+                    )
+                    .map_err(|e| {
+                        tracing::error!(
+                            "Failed to load hook definitions from {:?}: {}",
+                            repo_path,
+                            e
+                        );
                         e
-                    );
-                    e
-                })?;
+                    })?;
 
-            tracing::debug!("Loaded {} hook definitions", hook_definitions.len());
+                    tracing::debug!("Loaded {} hook definitions", hook_definitions.len());
+
+                    Ok::<(usize, HashMap<String, Hook>), crate::error::SnpError>((
+                        repo_index,
+                        hook_definitions,
+                    ))
+                })
+            })
+            .collect();
+
+        // Wait for all clone operations to complete
+        let clone_results = futures::future::try_join_all(clone_tasks)
+            .await
+            .map_err(|e| {
+                crate::error::SnpError::Storage(Box::new(
+                    crate::error::StorageError::ConcurrencyConflict {
+                        operation: "parallel_repository_cloning".to_string(),
+                        error: format!("Task join error: {e}"),
+                        retry_suggested: true,
+                    },
+                ))
+            })?;
+
+        // Process results and merge hook definitions
+        for clone_result in clone_results {
+            let (repo_index, hook_definitions) = clone_result?;
 
             // Merge user config with repository definitions
-            for user_hook in &mut repo.hooks {
+            for user_hook in &mut self.repos[repo_index].hooks {
                 if let Some(repo_hook_def) = hook_definitions.get(&user_hook.id) {
                     tracing::debug!("Merging definition for hook: {}", user_hook.id);
                     // Merge repository definition with user overrides

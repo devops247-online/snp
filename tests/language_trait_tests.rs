@@ -244,6 +244,7 @@ async fn test_plugin_extensibility() {
                 hook_id: hook.id.clone(),
                 success: true,
                 skipped: false,
+                skip_reason: None,
                 exit_code: Some(0),
                 stdout: "Custom plugin execution".to_string(),
                 stderr: String::new(),

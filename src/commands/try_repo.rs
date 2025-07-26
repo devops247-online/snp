@@ -324,6 +324,15 @@ async fn load_repository_hooks(repo_path: &Path, specific_hook: Option<&str>) ->
                 .get("minimum_pre_commit_version")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
+            depends_on: hook_def
+                .get("depends_on")
+                .and_then(|v| v.as_sequence())
+                .map(|seq| {
+                    seq.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default(),
         };
 
         hooks.push(hook);
