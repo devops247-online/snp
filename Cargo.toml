@@ -77,7 +77,7 @@ globset = "0.4"
 mime_guess = "2.0"
 tree_magic_mini = "3.0"
 encoding_rs = "0.8"
-infer = "0.15"
+infer = "0.19"
 
 # Process management
 which = "8.0"
