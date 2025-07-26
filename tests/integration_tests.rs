@@ -6,12 +6,15 @@ use predicates::prelude::*;
 
 #[test]
 fn test_binary_builds_successfully() {
-    // This test verifies that `cargo build` succeeds
-    // The binary should compile without errors
+    // This test verifies that `cargo build` succeeds and the binary can execute basic commands
+    // Test with --version flag to avoid hook execution issues in CI
     let mut cmd = Command::cargo_bin("snp").unwrap();
-    // Just check that the binary can be found and executed
-    // Don't require success since hook execution may fail
-    cmd.assert().code(predicate::in_iter([0, 1]));
+    cmd.arg("--version");
+
+    // Should succeed and show version information
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("snp"));
 }
 
 #[test]

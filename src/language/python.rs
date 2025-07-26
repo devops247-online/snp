@@ -445,14 +445,22 @@ impl PythonLanguagePlugin {
         let temp_dir = std::env::temp_dir();
         let env_path = temp_dir.join("snp-python-envs").join(env_id);
 
-        // If environment already exists, return it (handles race conditions)
-        if env_path.exists()
-            && self
+        // If environment already exists, validate it
+        if env_path.exists() {
+            if self
                 .validate_venv_directory(&env_path)
                 .await
                 .unwrap_or(false)
-        {
-            return Ok(env_path);
+            {
+                return Ok(env_path);
+            } else {
+                // Environment exists but is invalid, clean it up
+                tracing::debug!("Cleaning up invalid virtual environment: {:?}", env_path);
+                if let Err(e) = fs::remove_dir_all(&env_path).await {
+                    tracing::warn!("Failed to cleanup invalid venv directory: {}", e);
+                    // Continue anyway, the creation might still succeed
+                }
+            }
         }
 
         // Create parent directory
@@ -490,6 +498,18 @@ impl PythonLanguagePlugin {
         python_info: &PythonInfo,
         env_path: &Path,
     ) -> Result<PathBuf> {
+        // Clean up any partially created directory first
+        if env_path.exists() {
+            tracing::debug!(
+                "Removing existing directory before venv creation: {:?}",
+                env_path
+            );
+            if let Err(e) = tokio::fs::remove_dir_all(env_path).await {
+                tracing::warn!("Failed to remove existing directory: {}", e);
+                // Continue anyway - venv creation might still work
+            }
+        }
+
         // Retry mechanism for CI environments where transient failures can occur
         const MAX_RETRIES: u32 = 3;
         let mut last_error = None;
@@ -517,12 +537,23 @@ impl PythonLanguagePlugin {
             }
 
             let error_msg = String::from_utf8_lossy(&output.stderr);
+
+            // Check for specific "File exists" error and clean up before retry
+            if error_msg.contains("File exists") && attempt < MAX_RETRIES {
+                tracing::debug!("File exists error detected, cleaning up and retrying");
+                let _ = tokio::fs::remove_dir_all(env_path).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(100 * attempt as u64)).await;
+            }
+
             last_error = Some(SnpError::from(LanguageError::EnvironmentSetupFailed {
                 language: "python".to_string(),
                 error: format!(
                     "venv creation failed (attempt {attempt}/{MAX_RETRIES}): {error_msg}"
                 ),
-                recovery_suggestion: Some("Check Python installation and permissions".to_string()),
+                recovery_suggestion: Some(
+                    "Check Python installation and permissions. Try running with clean cache."
+                        .to_string(),
+                ),
             }));
 
             if attempt < MAX_RETRIES {
