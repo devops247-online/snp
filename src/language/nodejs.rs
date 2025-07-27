@@ -736,18 +736,69 @@ impl NodejsLanguagePlugin {
         project_path: &Path,
         dependencies: &[String],
     ) -> Result<NodejsEnvironment> {
+        let setup_start = Instant::now();
+        tracing::debug!(
+            "Setting up Node.js environment for project: {}",
+            project_path.display()
+        );
+
         // Detect workspace root if applicable
-        let workspace_root = self.find_workspace_root(project_path)?;
+        tracing::debug!("Detecting workspace root");
+        let workspace_root = self.find_workspace_root(project_path).map_err(|e| {
+            tracing::error!("Failed to detect workspace root: {}", e);
+            e
+        })?;
         let work_dir = workspace_root.as_deref().unwrap_or(project_path);
         let workspace_root_clone = workspace_root.clone();
 
+        if let Some(ref workspace) = workspace_root {
+            tracing::debug!("Found workspace root: {}", workspace.display());
+        } else {
+            tracing::debug!("No workspace root found, using project path");
+        }
+
         // Detect package manager
-        let package_manager = self.detect_package_manager(work_dir).await?;
+        tracing::debug!("Detecting package manager for {}", work_dir.display());
+        let package_manager_start = Instant::now();
+        let package_manager = self.detect_package_manager(work_dir).await.map_err(|e| {
+            tracing::error!("Failed to detect package manager: {}", e);
+            e
+        })?;
+        tracing::debug!(
+            "Detected package manager: {} (v{}) in {:?}",
+            package_manager.manager_type.as_str(),
+            package_manager.version,
+            package_manager_start.elapsed()
+        );
 
         // Install dependencies if needed
         if !dependencies.is_empty() {
+            tracing::debug!(
+                "Installing {} dependencies: {:?}",
+                dependencies.len(),
+                dependencies
+            );
+            let install_start = Instant::now();
             self.install_dependencies(&package_manager, work_dir, dependencies)
-                .await?;
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to install dependencies: {}", e);
+                    e
+                })?;
+            tracing::debug!("Dependencies installed in {:?}", install_start.elapsed());
+        } else {
+            tracing::debug!("No additional dependencies to install");
+        }
+
+        let total_setup_time = setup_start.elapsed();
+        tracing::debug!(
+            "Node.js environment setup completed in {:?}",
+            total_setup_time
+        );
+
+        // Log performance warning if setup took too long
+        if total_setup_time.as_secs() > 3 {
+            tracing::warn!("Node.js environment setup took {:?}, which is longer than expected. Consider checking network connectivity or using dependency caching.", total_setup_time);
         }
 
         Ok(NodejsEnvironment {
@@ -978,17 +1029,49 @@ impl Language for NodejsLanguagePlugin {
     }
 
     async fn setup_environment(&self, config: &EnvironmentConfig) -> Result<LanguageEnvironment> {
+        let setup_start = Instant::now();
+        tracing::debug!("Starting Node.js environment setup");
+
         // Find suitable Node.js installation
         let mut plugin_copy = self.clone(); // We need a mutable reference
-        let node_info = plugin_copy.find_suitable_node(config).await?;
+        tracing::debug!("Finding suitable Node.js installation");
+        let node_info = plugin_copy.find_suitable_node(config).await.map_err(|e| {
+            tracing::error!("Failed to find suitable Node.js installation: {}", e);
+            e
+        })?;
+        tracing::debug!(
+            "Found Node.js installation: v{} at {}",
+            node_info.version,
+            node_info.executable_path.display()
+        );
 
         // Determine project root (look for package.json)
-        let project_root = self.find_project_root(&std::env::current_dir()?)?;
+        tracing::debug!("Determining project root directory");
+        let project_root = self
+            .find_project_root(&std::env::current_dir()?)
+            .map_err(|e| {
+                tracing::error!("Failed to determine project root: {}", e);
+                e
+            })?;
+        tracing::debug!("Project root: {}", project_root.display());
 
         // Setup Node.js environment
+        tracing::debug!(
+            "Setting up Node.js environment with {} dependencies",
+            config.additional_dependencies.len()
+        );
         let nodejs_env = plugin_copy
             .setup_nodejs_environment(&node_info, &project_root, &config.additional_dependencies)
-            .await?;
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to setup Node.js environment: {}", e);
+                e
+            })?;
+
+        tracing::debug!(
+            "Node.js environment setup completed in {:?}",
+            setup_start.elapsed()
+        );
 
         Ok(LanguageEnvironment {
             language: "node".to_string(),
@@ -1033,12 +1116,56 @@ impl Language for NodejsLanguagePlugin {
         env: &LanguageEnvironment,
         files: &[PathBuf],
     ) -> Result<HookExecutionResult> {
-        let command = self.build_command(hook, env, files)?;
-        let mut result = self.execute_nodejs_command(command).await?;
+        let execution_start = Instant::now();
+        tracing::debug!(
+            "Executing Node.js hook '{}' with {} files",
+            hook.id,
+            files.len()
+        );
+
+        let command = self.build_command(hook, env, files).map_err(|e| {
+            tracing::error!("Failed to build command for hook '{}': {}", hook.id, e);
+            e
+        })?;
+
+        tracing::debug!(
+            "Built command for hook '{}': {} with {} args",
+            hook.id,
+            command.executable,
+            command.arguments.len()
+        );
+
+        let mut result = self.execute_nodejs_command(command).await.map_err(|e| {
+            tracing::error!(
+                "Failed to execute Node.js command for hook '{}': {}",
+                hook.id,
+                e
+            );
+            e
+        })?;
 
         // Set the correct hook ID and files
         result.hook_id = hook.id.clone();
         result.files_processed = files.to_vec();
+
+        let execution_time = execution_start.elapsed();
+        if result.success {
+            tracing::debug!(
+                "Hook '{}' completed successfully in {:?}",
+                hook.id,
+                execution_time
+            );
+        } else {
+            tracing::warn!(
+                "Hook '{}' failed after {:?} with exit code {:?}",
+                hook.id,
+                execution_time,
+                result.exit_code
+            );
+            if !result.stderr.is_empty() {
+                tracing::debug!("Hook '{}' stderr: {}", hook.id, result.stderr.trim());
+            }
+        }
 
         Ok(result)
     }

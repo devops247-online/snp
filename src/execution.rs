@@ -12,7 +12,7 @@ use futures::future::BoxFuture;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 /// Hook execution configuration
 #[derive(Debug, Clone)]
@@ -359,12 +359,13 @@ impl HookExecutionEngine {
         }
 
         // Check if this hook needs repository installation
-        // If the hook entry is not a system command (doesn't start with / and not in PATH),
-        // we need to find and install it from a repository
+        // Script language always needs repository path to locate script files
+        // For other languages, check if the entry is not a system command
         let executable_name = hook.entry.split_whitespace().next().unwrap_or(&hook.entry);
-        let needs_repo_installation = !hook.entry.starts_with('/')
-            && !hook.entry.contains('/')
-            && which::which(executable_name).is_err();
+        let needs_repo_installation = hook.language == "script"
+            || (!hook.entry.starts_with('/')
+                && !hook.entry.contains('/')
+                && which::which(executable_name).is_err());
 
         if needs_repo_installation {
             // Try to find the repository that contains this hook
@@ -520,10 +521,13 @@ impl HookExecutionEngine {
             };
 
             // Check if this hook needs repository installation
+            // Script language always needs repository path to locate script files
+            // For other languages, check if the entry is not a system command
             let executable_name = hook.entry.split_whitespace().next().unwrap_or(&hook.entry);
-            let needs_repo_installation = !hook.entry.starts_with('/')
-                && !hook.entry.contains('/')
-                && which::which(executable_name).is_err();
+            let needs_repo_installation = hook.language == "script"
+                || (!hook.entry.starts_with('/')
+                    && !hook.entry.contains('/')
+                    && which::which(executable_name).is_err());
 
             let repository_path = if needs_repo_installation {
                 self.find_repository_for_hook(&hook.id).await?
@@ -570,6 +574,7 @@ impl HookExecutionEngine {
         tracing::debug!("Pre-setting up environments for {} groups", groups.len());
 
         for group in groups {
+            let setup_start = Instant::now();
             tracing::debug!(
                 "Setting up environment for language: {} with {} hooks",
                 group.language,
@@ -595,9 +600,34 @@ impl HookExecutionEngine {
             let env_key = self.generate_environment_cache_key(&group.language, &group.dependencies);
 
             // Setup environment (this will use the existing caching mechanism)
-            let environment = self
+            let environment = match self
                 .get_or_create_environment(&group.language, &env_config, &group.dependencies)
-                .await?;
+                .await
+            {
+                Ok(env) => {
+                    let setup_time = setup_start.elapsed();
+                    tracing::debug!(
+                        "Environment setup for {} completed in {:?}",
+                        group.language,
+                        setup_time
+                    );
+                    env
+                }
+                Err(e) => {
+                    let setup_time = setup_start.elapsed();
+                    tracing::error!(
+                        "Failed to setup environment for language '{}' after {:?}: {}",
+                        group.language,
+                        setup_time,
+                        e
+                    );
+                    tracing::debug!(
+                        "Affected hooks: {:?}",
+                        group.hooks.iter().map(|h| &h.id).collect::<Vec<_>>()
+                    );
+                    return Err(e);
+                }
+            };
 
             environments.insert(env_key, environment);
         }
