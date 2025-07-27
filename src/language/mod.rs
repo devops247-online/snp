@@ -12,6 +12,7 @@ pub mod python;
 pub mod registry;
 pub mod ruby;
 pub mod rust;
+pub mod script;
 pub mod system;
 pub mod traits;
 
@@ -33,6 +34,7 @@ pub use python::PythonLanguagePlugin;
 pub use registry::{LanguageRegistry, PluginMetadata};
 pub use ruby::RubyLanguagePlugin;
 pub use rust::RustLanguagePlugin;
+pub use script::ScriptLanguagePlugin;
 pub use system::SystemLanguagePlugin;
 pub use traits::{Language, LanguageError};
 
