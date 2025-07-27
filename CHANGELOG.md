@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.0] - 2025-07-27
 
+## [1.0.0] - 2025-07-27
+
 ### Added
 - Comprehensive semantic versioning strategy
 - CHANGELOG.md for tracking all changes
