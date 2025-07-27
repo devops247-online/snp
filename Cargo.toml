@@ -1,6 +1,6 @@
 [package]
 name = "snp"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 authors = ["SNP Contributors"]
 description = "A fast, reliable pre-commit framework written in Rust with 100% Python pre-commit compatibility"
