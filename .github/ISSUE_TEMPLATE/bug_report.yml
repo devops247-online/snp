@@ -1,0 +1,255 @@
+name: 🐛 Bug Report
+description: Report a bug or unexpected behavior in SNP
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a bug! Please fill out this form with as much detail as possible to help us reproduce and fix the issue.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-flight Checklist
+      description: Please check that you've done the following before submitting this bug report
+      options:
+        - label: I have searched existing issues to ensure this bug hasn't already been reported
+          required: true
+        - label: I have tested with the latest version of SNP
+          required: true
+        - label: I have read the documentation and troubleshooting guide
+          required: true
+
+  - type: input
+    id: snp-version
+    attributes:
+      label: SNP Version
+      description: What version of SNP are you using? Run `snp --version` to find out.
+      placeholder: "snp 1.0.0 (commit: abc123, branch: main, built: 2024-01-01, rustc: 1.75.0)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: installation-method
+    attributes:
+      label: Installation Method
+      description: How did you install SNP?
+      options:
+        - "Cargo install"
+        - "GitHub Releases (binary)"
+        - "Package manager (brew, apt, etc.)"
+        - "Built from source"
+        - "Other (please specify in description)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating System
+      description: What operating system are you using?
+      options:
+        - "Linux"
+        - "macOS"
+        - "Windows"
+        - "Other (please specify)"
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS Version
+      description: Please provide your OS version
+      placeholder: "e.g., Ubuntu 22.04, macOS 14.1, Windows 11"
+    validations:
+      required: true
+
+  - type: input
+    id: git-version
+    attributes:
+      label: Git Version
+      description: What version of Git are you using? Run `git --version` to find out.
+      placeholder: "git version 2.42.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: pre-commit-config
+    attributes:
+      label: Pre-commit Configuration
+      description: Please paste your `.pre-commit-config.yaml` file content
+      placeholder: |
+        repos:
+          - repo: https://github.com/psf/black
+            rev: 23.9.1
+            hooks:
+              - id: black
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is
+      placeholder: "SNP fails to run hooks when..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: Steps to Reproduce
+      description: Please provide detailed steps to reproduce the bug
+      placeholder: |
+        1. Create a new git repository
+        2. Add a .pre-commit-config.yaml file with...
+        3. Run `snp install`
+        4. Run `snp run`
+        5. See error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+      placeholder: "SNP should successfully run the hooks and..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual Behavior
+      description: What actually happened?
+      placeholder: "Instead, SNP crashed with the error..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: error-output
+    attributes:
+      label: Error Output
+      description: Please paste any error messages, stack traces, or relevant log output
+      placeholder: "Paste error messages here..."
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: verbose-output
+    attributes:
+      label: Verbose Output
+      description: If possible, run SNP with the `--verbose` flag and paste the output
+      placeholder: "Run `snp --verbose run` and paste output here..."
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: repository-size
+    attributes:
+      label: Repository Size
+      description: Approximate number of files in your repository (if relevant)
+      placeholder: "e.g., 1000 files"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: hook-types
+    attributes:
+      label: Hook Types Involved
+      description: Which hook types are involved in this bug? (Select all that apply)
+      multiple: true
+      options:
+        - "pre-commit"
+        - "pre-push"
+        - "commit-msg"
+        - "post-commit"
+        - "pre-rebase"
+        - "Not applicable"
+
+  - type: checkboxes
+    id: languages-involved
+    attributes:
+      label: Languages/Tools Involved
+      description: Which languages or tools are involved in this bug? (Check all that apply)
+      options:
+        - label: Python
+        - label: Rust
+        - label: Node.js/JavaScript/TypeScript
+        - label: Go
+        - label: Ruby
+        - label: Docker
+        - label: System commands
+        - label: Other (please specify in additional context)
+
+  - type: textarea
+    id: environment-info
+    attributes:
+      label: Environment Information
+      description: Any additional environment details that might be relevant
+      placeholder: |
+        - Python version (if applicable): 3.11.6
+        - Node.js version (if applicable): 18.17.0
+        - Rust version (if applicable): 1.75.0
+        - Docker version (if applicable): 24.0.6
+        - Shell: bash 5.2.15
+        - Terminal: iTerm2
+    validations:
+      required: false
+
+  - type: dropdown
+    id: regression
+    attributes:
+      label: Regression Status
+      description: Did this work in a previous version of SNP?
+      options:
+        - "Not sure"
+        - "Yes, this worked in a previous version"
+        - "No, this has never worked"
+        - "This is my first time using SNP"
+    validations:
+      required: false
+
+  - type: input
+    id: last-working-version
+    attributes:
+      label: Last Working Version
+      description: If this is a regression, what was the last version where this worked?
+      placeholder: "e.g., 0.9.5"
+    validations:
+      required: false
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround
+      description: Have you found any workaround for this issue?
+      placeholder: "I can work around this by..."
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Add any other context, screenshots, or files that might help
+      placeholder: "Any additional information that might be helpful..."
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      description: Would you be willing to help fix this bug?
+      options:
+        - label: I would be willing to submit a pull request to fix this issue

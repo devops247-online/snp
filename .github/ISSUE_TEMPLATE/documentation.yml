@@ -1,0 +1,296 @@
+name: 📚 Documentation Issue
+description: Report issues with documentation or suggest improvements
+title: "[Docs]: "
+labels: ["documentation", "needs-triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve SNP's documentation! Clear documentation is essential for user adoption and success.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-flight Checklist
+      description: Please check that you've done the following before submitting this documentation issue
+      options:
+        - label: I have searched existing issues to ensure this documentation issue hasn't already been reported
+          required: true
+        - label: I have checked multiple documentation sources (README, docs.rs, GitHub wiki, etc.)
+          required: true
+
+  - type: dropdown
+    id: documentation-type
+    attributes:
+      label: Documentation Type
+      description: What type of documentation issue is this?
+      options:
+        - "Missing documentation"
+        - "Incorrect/outdated information"
+        - "Unclear or confusing explanation"
+        - "Missing examples"
+        - "Typos or grammar issues"
+        - "Better organization needed"
+        - "New documentation suggestion"
+        - "Translation issue"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: documentation-location
+    attributes:
+      label: Documentation Location
+      description: Where is the documentation issue located?
+      options:
+        - "README.md"
+        - "docs.rs API documentation"
+        - "CLI help text (--help)"
+        - "GitHub repository documentation"
+        - "Error messages"
+        - "Code comments"
+        - "CHANGELOG.md"
+        - "Installation instructions"
+        - "Configuration examples"
+        - "Multiple locations"
+        - "Not sure where it should be"
+    validations:
+      required: true
+
+  - type: input
+    id: specific-location
+    attributes:
+      label: Specific Location
+      description: If known, provide the specific file, section, or URL where the issue exists
+      placeholder: "e.g., README.md line 45, docs.rs crate::config module, CLI help for 'run' command"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: user-level
+    attributes:
+      label: Target User Level
+      description: What level of user would this documentation help?
+      options:
+        - "Complete beginners to SNP"
+        - "New users migrating from pre-commit"
+        - "Intermediate users"
+        - "Advanced users and power users"
+        - "Contributors and developers"
+        - "All user levels"
+    validations:
+      required: true
+
+  - type: textarea
+    id: issue-description
+    attributes:
+      label: Documentation Issue Description
+      description: Describe the documentation problem or gap
+      placeholder: |
+        The current documentation is unclear about...
+        Users might be confused by...
+        There's no information about how to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-content
+    attributes:
+      label: Current Content (if applicable)
+      description: If reporting incorrect/unclear content, paste the current text
+      placeholder: "Paste the current documentation content that needs improvement..."
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected-content
+    attributes:
+      label: Expected or Suggested Content
+      description: What should the documentation say instead? Provide specific suggestions if possible.
+      placeholder: |
+        The documentation should explain...
+        A better way to describe this would be...
+        Missing information should include...
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case or Context
+      description: What were you trying to accomplish when you encountered this documentation issue?
+      placeholder: |
+        I was trying to...
+        As a new user, I wanted to...
+        When setting up SNP for my team...
+    validations:
+      required: true
+
+  - type: textarea
+    id: confusion-points
+    attributes:
+      label: Confusion Points
+      description: What specific aspects were confusing or unclear?
+      placeholder: |
+        I didn't understand...
+        It wasn't clear whether...
+        The relationship between X and Y was confusing...
+    validations:
+      required: false
+
+  - type: textarea
+    id: missing-examples
+    attributes:
+      label: Missing Examples
+      description: What examples would help clarify the documentation?
+      placeholder: |
+        Examples that would help:
+        - Configuration example for X scenario
+        - Command line usage for Y use case
+        - Step-by-step guide for Z workflow
+      render: text
+    validations:
+      required: false
+
+  - type: dropdown
+    id: impact-level
+    attributes:
+      label: Impact Level
+      description: How much does this documentation issue impact users?
+      options:
+        - "Minor - small improvement"
+        - "Moderate - would help many users"
+        - "Major - blocking user adoption"
+        - "Critical - causes user errors or confusion"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: related-topics
+    attributes:
+      label: Related Topics
+      description: Which topics are related to this documentation issue? (Check all that apply)
+      options:
+        - label: Installation and setup
+        - label: Basic usage and getting started
+        - label: Configuration file format
+        - label: CLI commands and options
+        - label: Language plugin usage
+        - label: Hook chaining and dependencies
+        - label: Performance optimization
+        - label: Troubleshooting and debugging
+        - label: Migration from Python pre-commit
+        - label: Advanced features
+        - label: Contributing and development
+        - label: API reference
+
+  - type: textarea
+    id: target-audience
+    attributes:
+      label: Target Audience Details
+      description: Who specifically would benefit from this documentation improvement?
+      placeholder: |
+        This would help:
+        - New users trying to migrate from pre-commit
+        - Teams setting up SNP in CI/CD
+        - Users working with specific languages
+        - Contributors wanting to add features
+    validations:
+      required: false
+
+  - type: textarea
+    id: research-done
+    attributes:
+      label: Research Done
+      description: What research or attempts to find information have you already done?
+      placeholder: |
+        I looked at:
+        - README.md sections X, Y, Z
+        - CLI help for commands A, B, C
+        - GitHub issues #123, #456
+        - Similar tools' documentation
+    validations:
+      required: false
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Current Workaround
+      description: How are you currently working around this documentation gap?
+      placeholder: |
+        Currently I:
+        - Read the source code
+        - Asked on community channels
+        - Trial and error approach
+        - Used external resources
+    validations:
+      required: false
+
+  - type: dropdown
+    id: urgency
+    attributes:
+      label: Urgency
+      description: How urgent is this documentation improvement?
+      options:
+        - "Not urgent - nice to have"
+        - "Moderate - would help ongoing work"
+        - "High - needed for current project"
+        - "Critical - blocking team adoption"
+    validations:
+      required: false
+
+  - type: textarea
+    id: suggested-organization
+    attributes:
+      label: Suggested Organization
+      description: If this is about documentation structure, how should it be organized?
+      placeholder: |
+        Suggested documentation structure:
+        1. Overview section
+        2. Quick start guide
+        3. Detailed configuration
+        4. Advanced topics
+        5. Troubleshooting
+    validations:
+      required: false
+
+  - type: textarea
+    id: cross-references
+    attributes:
+      label: Cross-references Needed
+      description: What other documentation sections should this link to?
+      placeholder: |
+        This documentation should link to:
+        - Related CLI commands
+        - Configuration examples
+        - Troubleshooting guides
+        - API documentation
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      description: How would you be willing to help improve this documentation?
+      options:
+        - label: I would be willing to submit a pull request with the documentation fix
+        - label: I would be willing to review and test documentation improvements
+        - label: I would be willing to provide feedback on proposed changes
+        - label: I can provide subject matter expertise
+        - label: I can help with proofreading and editing
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other context, links, or suggestions that might help
+      placeholder: |
+        Additional information:
+        - Links to helpful external resources
+        - Screenshots or examples
+        - Similar documentation from other tools
+        - Community discussions about this topic
+    validations:
+      required: false

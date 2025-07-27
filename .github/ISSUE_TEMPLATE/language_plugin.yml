@@ -1,0 +1,371 @@
+name: 🔌 Language Plugin Request
+description: Request support for a new programming language or enhancement to existing language plugins
+title: "[Language Plugin]: "
+labels: ["language-plugin", "enhancement", "needs-triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for requesting language plugin support! SNP aims to provide comprehensive language support with proper tooling integration. Please provide detailed information about the language and its ecosystem.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-flight Checklist
+      description: Please check that you've done the following before submitting this request
+      options:
+        - label: I have searched existing issues to ensure this language plugin hasn't already been requested
+          required: true
+        - label: I have checked if this language is already supported in SNP
+          required: true
+        - label: I understand that language plugins require significant development effort
+          required: true
+
+  - type: dropdown
+    id: request-type
+    attributes:
+      label: Request Type
+      description: What type of language plugin request is this?
+      options:
+        - "New language support"
+        - "Enhancement to existing language plugin"
+        - "Additional tool support for existing language"
+        - "Better integration with language ecosystem"
+        - "Performance improvement for existing plugin"
+    validations:
+      required: true
+
+  - type: input
+    id: language-name
+    attributes:
+      label: Language Name
+      description: What programming language do you want support for?
+      placeholder: "e.g., Swift, Kotlin, Zig, Elixir, etc."
+    validations:
+      required: true
+
+  - type: input
+    id: language-version
+    attributes:
+      label: Language Version
+      description: What version(s) of the language should be supported?
+      placeholder: "e.g., Swift 5.x, Kotlin 1.8+, PHP 8.0+"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: language-popularity
+    attributes:
+      label: Language Popularity
+      description: How popular/widely used is this language?
+      options:
+        - "Very popular (top 10 languages)"
+        - "Popular (top 20 languages)"
+        - "Moderately popular (growing community)"
+        - "Niche but important in specific domains"
+        - "Emerging/experimental language"
+    validations:
+      required: true
+
+  - type: textarea
+    id: language-description
+    attributes:
+      label: Language Description
+      description: Briefly describe the language and its primary use cases
+      placeholder: |
+        Language X is a system programming language designed for...
+        It's commonly used for...
+        Key characteristics include...
+    validations:
+      required: true
+
+  - type: textarea
+    id: common-tools
+    attributes:
+      label: Common Development Tools
+      description: List the most common linters, formatters, and development tools for this language
+      placeholder: |
+        Linters:
+        - tool-name-1: Static analysis tool
+        - tool-name-2: Code quality checker
+
+        Formatters:
+        - formatter-1: Code formatting tool
+        - formatter-2: Style enforcer
+
+        Other Tools:
+        - test-runner: Unit testing framework
+        - documentation-generator: Doc generation tool
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: package-managers
+    attributes:
+      label: Package Managers and Build Tools
+      description: What package managers and build tools are used with this language?
+      placeholder: |
+        Package Managers:
+        - manager-1 (most common)
+        - manager-2 (alternative)
+
+        Build Tools:
+        - build-tool-1
+        - build-tool-2
+
+        Configuration Files:
+        - package.json equivalent
+        - build configuration files
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment-setup
+    attributes:
+      label: Environment Setup
+      description: How is the development environment typically set up for this language?
+      placeholder: |
+        Installation methods:
+        - Official installer
+        - Package manager (brew, apt, etc.)
+        - Version manager (like nvm, pyenv)
+
+        Environment variables:
+        - PATH modifications
+        - Language-specific environment variables
+
+        Dependencies:
+        - System dependencies
+        - Runtime requirements
+    validations:
+      required: true
+
+  - type: textarea
+    id: tool-installation
+    attributes:
+      label: Tool Installation Examples
+      description: Provide examples of how tools are typically installed for this language
+      placeholder: |
+        # Example tool installations
+        npm install -g eslint  # for JavaScript
+        gem install rubocop   # for Ruby
+        go install tool       # for Go
+        cargo install tool    # for Rust
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: configuration-examples
+    attributes:
+      label: Configuration Examples
+      description: Show examples of how these tools are typically configured in pre-commit
+      placeholder: |
+        # Current pre-commit configuration examples:
+        repos:
+          - repo: local
+            hooks:
+              - id: language-linter
+                name: Language Linter
+                entry: linter-command
+                language: system
+                files: \.ext$
+      render: yaml
+    validations:
+      required: true
+
+  - type: dropdown
+    id: cross-platform
+    attributes:
+      label: Cross-Platform Support
+      description: Does this language/tooling work across all platforms?
+      options:
+        - "Yes, works on Linux, macOS, and Windows"
+        - "Mostly cross-platform with minor differences"
+        - "Some platform-specific limitations"
+        - "Limited to specific platforms"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: version-detection
+    attributes:
+      label: Version Detection
+      description: How can SNP detect if this language and its tools are installed?
+      placeholder: |
+        Language version detection:
+        - Command: language --version
+        - Expected output format: Language X.Y.Z
+
+        Tool version detection:
+        - tool1 --version
+        - tool2 -V
+
+        Installation detection:
+        - Check for executable in PATH
+        - Check for configuration files
+        - Check for package manager files
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependency-management
+    attributes:
+      label: Dependency Management
+      description: How should SNP handle dependencies for this language?
+      placeholder: |
+        Dependency installation:
+        - Auto-install tools if missing?
+        - Use virtual environments?
+        - Install globally or per-project?
+
+        Dependency isolation:
+        - How to avoid conflicts between projects
+        - Version pinning strategies
+
+        Cleanup:
+        - How to clean up installed dependencies
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: existing-integration
+    attributes:
+      label: Existing Integration
+      description: How is this language currently handled? (Check all that apply)
+      options:
+        - label: Can be used with 'system' language hooks
+        - label: Can be used with 'docker' language hooks
+        - label: Some tools work with existing language plugins
+        - label: No current integration possible
+        - label: Not sure
+
+  - type: textarea
+    id: current-workarounds
+    attributes:
+      label: Current Workarounds
+      description: How do you currently use this language with pre-commit or SNP?
+      placeholder: |
+        Currently I work around this by:
+        - Using system hooks with specific commands
+        - Using docker containers
+        - Manual tool execution outside of pre-commit
+        - Not using pre-commit for this language
+    validations:
+      required: false
+
+  - type: dropdown
+    id: complexity-estimate
+    attributes:
+      label: Implementation Complexity
+      description: How complex do you think implementing this plugin would be?
+      options:
+        - "Simple (similar to existing plugins)"
+        - "Moderate (requires some custom logic)"
+        - "Complex (unique requirements)"
+        - "Very complex (major new patterns needed)"
+        - "Not sure"
+    validations:
+      required: false
+
+  - type: textarea
+    id: unique-requirements
+    attributes:
+      label: Unique Requirements
+      description: Are there any unique requirements or challenges for this language?
+      placeholder: |
+        Special considerations:
+        - Requires specific compiler version
+        - Needs special environment setup
+        - Has unique file organization patterns
+        - Requires specific execution order
+        - Has security considerations
+    validations:
+      required: false
+
+  - type: textarea
+    id: community-impact
+    attributes:
+      label: Community Impact
+      description: How would this plugin benefit the broader community?
+      placeholder: |
+        This would benefit:
+        - X number of developers using this language
+        - Y popular projects that could adopt SNP
+        - Z specific domains/industries
+
+        Evidence of demand:
+        - Links to discussions
+        - Similar requests in other tools
+        - Community surveys or polls
+    validations:
+      required: false
+
+  - type: textarea
+    id: reference-implementations
+    attributes:
+      label: Reference Implementations
+      description: Are there similar implementations in other tools we can reference?
+      placeholder: |
+        Similar implementations:
+        - Python pre-commit: link to existing hooks
+        - Other tools: description of how they handle this language
+        - Open source projects: examples of integration
+    validations:
+      required: false
+
+  - type: dropdown
+    id: priority-level
+    attributes:
+      label: Priority Level
+      description: How important is this plugin to you and your team?
+      options:
+        - "Nice to have"
+        - "Would improve our workflow significantly"
+        - "Critical for adopting SNP"
+        - "Blocking our current projects"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: timeline
+    attributes:
+      label: Timeline
+      description: When do you need this plugin?
+      options:
+        - "No specific timeline"
+        - "Within next few months"
+        - "Soon (next release cycle)"
+        - "Urgent (current project dependency)"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      description: How would you be willing to help with this language plugin?
+      options:
+        - label: I would be willing to submit a pull request to implement this plugin
+        - label: I would be willing to help with testing and feedback
+        - label: I would be willing to help with documentation
+        - label: I can provide domain expertise for this language
+        - label: I can help with maintenance once implemented
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other context, links, or information that would help
+      placeholder: |
+        Additional information:
+        - Links to language documentation
+        - Links to popular tools
+        - Examples of existing configurations
+        - Community discussions
+    validations:
+      required: false
