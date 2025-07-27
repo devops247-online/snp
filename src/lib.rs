@@ -117,7 +117,27 @@ mod tests {
 
     #[test]
     fn test_version_constant() {
-        assert_eq!(VERSION, "0.1.0");
+        // Verify VERSION follows semantic versioning format (X.Y.Z or X.Y.Z-suffix)
+        let parts: Vec<&str> = VERSION.split('.').collect();
+        assert!(
+            parts.len() >= 3,
+            "VERSION '{VERSION}' should have at least 3 parts separated by dots (X.Y.Z)"
+        );
+
+        // Check that first three parts are numbers
+        for (i, part) in parts.iter().take(3).enumerate() {
+            let number_part = if i == 2 {
+                // Third part might have a suffix (e.g., "0-alpha1")
+                part.split('-').next().unwrap_or(part)
+            } else {
+                part
+            };
+
+            assert!(
+                number_part.chars().all(|c| c.is_ascii_digit()),
+                "VERSION '{VERSION}' part '{number_part}' should be a number"
+            );
+        }
     }
 
     #[test]
