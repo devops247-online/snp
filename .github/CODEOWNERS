@@ -1,0 +1,24 @@
+# CODEOWNERS file for SNP (Shell Not Pass)
+# This file defines code ownership for automatic reviewer assignment
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global owner - all changes require review from the project maintainer
+* @grok-rs
+
+# Critical security and architecture files - require extra attention
+/src/core.rs @grok-rs
+/src/execution.rs @grok-rs
+/src/process.rs @grok-rs
+/src/file_lock.rs @grok-rs
+/src/regex_processor.rs @grok-rs
+/src/validation.rs @grok-rs
+
+# Build and release infrastructure - critical for project stability
+Cargo.toml @grok-rs
+.github/workflows/ @grok-rs
+scripts/release.sh @grok-rs
+
+# Project governance files
+README.md @grok-rs
+CHANGELOG.md @grok-rs
+.github/CODEOWNERS @grok-rs
