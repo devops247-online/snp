@@ -1,0 +1,300 @@
+name: 🔒 Security Issue
+description: Report a security vulnerability (private and confidential)
+title: "[Security]: "
+labels: ["security", "needs-triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ⚠️ **SECURITY NOTICE** ⚠️
+
+        If you believe you have found a **critical security vulnerability**, please do **NOT** file a public issue. Instead, please contact us privately:
+
+        - Email: [Security contact email - replace with actual email]
+        - GitHub Security Advisory: Use the "Security" tab in this repository
+
+        For **non-critical security improvements** or **security-related questions**, you may use this template.
+
+  - type: checkboxes
+    id: security-confirmation
+    attributes:
+      label: Security Confirmation
+      description: Please confirm the nature of this security issue
+      options:
+        - label: This is NOT a critical vulnerability that could be exploited immediately
+          required: true
+        - label: I understand that critical vulnerabilities should be reported privately
+          required: true
+        - label: This is a security improvement suggestion or non-critical security concern
+          required: true
+
+  - type: dropdown
+    id: security-type
+    attributes:
+      label: Security Issue Type
+      description: What type of security issue is this?
+      options:
+        - "Security improvement suggestion"
+        - "Security-related configuration question"
+        - "Security documentation gap"
+        - "Dependency security concern"
+        - "Permission or access control question"
+        - "Secure coding practice suggestion"
+        - "Security audit request"
+        - "Other security-related topic"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity-level
+    attributes:
+      label: Severity Level
+      description: How would you rate the severity of this security concern?
+      options:
+        - "Low - informational or minor improvement"
+        - "Medium - moderate security enhancement"
+        - "High - important security improvement needed"
+        - "Critical - should have been reported privately"
+    validations:
+      required: true
+
+  - type: textarea
+    id: security-description
+    attributes:
+      label: Security Issue Description
+      description: Describe the security concern or improvement suggestion
+      placeholder: |
+        Describe the security issue or improvement:
+        - What security aspect is involved?
+        - Why is this a concern?
+        - What could be improved?
+
+        Note: Avoid providing specific exploit details in public issues.
+    validations:
+      required: true
+
+  - type: textarea
+    id: affected-components
+    attributes:
+      label: Affected Components
+      description: Which parts of SNP are affected by this security concern?
+      placeholder: |
+        Components involved:
+        - CLI argument parsing
+        - Configuration file handling
+        - Hook execution environment
+        - File processing
+        - Network requests
+        - Dependency management
+        - etc.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: snp-version
+    attributes:
+      label: SNP Version
+      description: Which version of SNP does this affect?
+      options:
+        - "Latest release"
+        - "Specific version (please specify below)"
+        - "Development version"
+        - "All versions"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: input
+    id: specific-version
+    attributes:
+      label: Specific Version
+      description: If applicable, specify the exact SNP version
+      placeholder: "e.g., 1.0.0, commit abc123"
+    validations:
+      required: false
+
+  - type: textarea
+    id: security-context
+    attributes:
+      label: Security Context
+      description: In what context or scenario does this security concern arise?
+      placeholder: |
+        Security context:
+        - When running SNP in CI/CD environments
+        - When processing untrusted configuration files
+        - When executing hooks from external repositories
+        - When running with elevated privileges
+        - etc.
+    validations:
+      required: true
+
+  - type: textarea
+    id: potential-impact
+    attributes:
+      label: Potential Impact
+      description: What could be the potential security impact if this issue is not addressed?
+      placeholder: |
+        Potential security impacts:
+        - Information disclosure
+        - Unauthorized file access
+        - Command injection
+        - Privilege escalation
+        - Supply chain attack vector
+        - etc.
+
+        Note: Be general rather than specific about exploit scenarios.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: attack-vector
+    attributes:
+      label: Attack Vector
+      description: How might this security issue be exploited? (General categories only)
+      options:
+        - "Local access required"
+        - "Network-based attack"
+        - "Social engineering component"
+        - "Supply chain attack"
+        - "Configuration manipulation"
+        - "Input validation bypass"
+        - "Not applicable - this is a hardening suggestion"
+        - "Other (please describe generally)"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites for Exploitation
+      description: What would an attacker need to exploit this? (Check all that apply)
+      options:
+        - label: Local system access
+        - label: Ability to modify configuration files
+        - label: Network access to the system
+        - label: Ability to provide malicious input
+        - label: Social engineering of users
+        - label: Access to development environment
+        - label: Ability to modify dependencies
+        - label: No special access required
+
+  - type: textarea
+    id: current-mitigations
+    attributes:
+      label: Current Mitigations
+      description: Are there any existing mitigations or workarounds for this security concern?
+      placeholder: |
+        Current mitigations:
+        - User can avoid this by...
+        - The impact is limited because...
+        - SNP already has protections like...
+        - Recommended security practices include...
+    validations:
+      required: false
+
+  - type: textarea
+    id: suggested-improvements
+    attributes:
+      label: Suggested Security Improvements
+      description: What specific improvements do you suggest to address this security concern?
+      placeholder: |
+        Suggested improvements:
+        - Add input validation for...
+        - Implement sandboxing for...
+        - Add security warnings when...
+        - Improve documentation about...
+        - Add configuration options for...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: security-best-practices
+    attributes:
+      label: Related Security Best Practices
+      description: Which security best practices are relevant to this issue? (Check all that apply)
+      options:
+        - label: Input validation and sanitization
+        - label: Principle of least privilege
+        - label: Defense in depth
+        - label: Secure by default configuration
+        - label: Clear security documentation
+        - label: Dependency security management
+        - label: Secure coding practices
+        - label: Security testing and auditing
+
+  - type: textarea
+    id: environment-details
+    attributes:
+      label: Environment Details
+      description: In what environments is this security concern most relevant?
+      placeholder: |
+        Relevant environments:
+        - CI/CD pipelines
+        - Shared development machines
+        - Production deployments
+        - Container environments
+        - Cloud-based development
+        - etc.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: disclosure-timeline
+    attributes:
+      label: Disclosure Timeline
+      description: What timeline is appropriate for addressing this security concern?
+      options:
+        - "No specific timeline - general improvement"
+        - "Should be addressed in next release"
+        - "Should be prioritized but not urgent"
+        - "Should be addressed quickly"
+        - "This should have been reported privately"
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References and Resources
+      description: Any relevant security resources, standards, or similar issues in other projects?
+      placeholder: |
+        Security references:
+        - OWASP guidelines: https://...
+        - Similar issues in other tools: ...
+        - Security standards or CVEs: ...
+        - Research papers or blog posts: ...
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: responsible-disclosure
+    attributes:
+      label: Responsible Disclosure
+      description: Please confirm your understanding of responsible disclosure
+      options:
+        - label: I understand this issue will be publicly visible immediately upon submission
+        - label: I confirm this is not a critical vulnerability that should be reported privately
+        - label: I agree to work constructively with maintainers to improve SNP's security
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      description: How would you be willing to help address this security concern?
+      options:
+        - label: I would be willing to submit a pull request with security improvements
+        - label: I would be willing to help with security testing
+        - label: I would be willing to help with security documentation
+        - label: I can provide security expertise and review
+        - label: I can help with security auditing
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other context that might help address this security concern
+      placeholder: "Any additional information that might be helpful for improving security..."
+    validations:
+      required: false

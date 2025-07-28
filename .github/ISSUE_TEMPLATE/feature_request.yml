@@ -1,0 +1,275 @@
+name: ✨ Feature Request
+description: Suggest a new feature or enhancement for SNP
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting a new feature! Please provide as much detail as possible to help us understand and evaluate your request.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-flight Checklist
+      description: Please check that you've done the following before submitting this feature request
+      options:
+        - label: I have searched existing issues to ensure this feature hasn't already been requested
+          required: true
+        - label: I have checked the documentation to ensure this feature doesn't already exist
+          required: true
+        - label: I understand that feature requests require community discussion and may not be immediately implemented
+          required: true
+
+  - type: dropdown
+    id: feature-category
+    attributes:
+      label: Feature Category
+      description: What type of feature are you requesting?
+      options:
+        - "New CLI command or subcommand"
+        - "New hook type support"
+        - "Language plugin enhancement"
+        - "Performance improvement"
+        - "Configuration option"
+        - "Integration with external tools"
+        - "Developer experience improvement"
+        - "Documentation enhancement"
+        - "Other (please specify)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority Level
+      description: How important is this feature to you?
+      options:
+        - "Nice to have"
+        - "Important for my workflow"
+        - "Critical for adoption"
+        - "Blocking my usage of SNP"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem-description
+    attributes:
+      label: Problem Description
+      description: What problem does this feature solve? What is the current limitation or pain point?
+      placeholder: |
+        Currently, when using SNP, I find it difficult to...
+        This becomes a problem because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the feature you'd like to see implemented
+      placeholder: |
+        I would like SNP to have a feature that...
+        This would work by...
+        The user interface would look like...
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-cases
+    attributes:
+      label: Use Cases
+      description: Provide specific examples of how this feature would be used
+      placeholder: |
+        Use case 1: When working on a large monorepo...
+        Use case 2: For teams that need to...
+        Use case 3: In CI/CD pipelines where...
+    validations:
+      required: true
+
+  - type: textarea
+    id: example-usage
+    attributes:
+      label: Example Usage
+      description: Show how you imagine using this feature with command examples or configuration
+      placeholder: |
+        # Command line usage:
+        snp new-command --option value
+
+        # Or configuration in .pre-commit-config.yaml:
+        repos:
+          - repo: local
+            hooks:
+              - id: my-hook
+                new_option: value
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives-considered
+    attributes:
+      label: Alternatives Considered
+      description: What alternative solutions or workarounds have you considered?
+      placeholder: |
+        I considered using...
+        However, this doesn't work because...
+        Another approach would be... but...
+    validations:
+      required: false
+
+  - type: dropdown
+    id: compatibility-impact
+    attributes:
+      label: Compatibility Impact
+      description: Would this feature require breaking changes to existing functionality?
+      options:
+        - "No breaking changes expected"
+        - "Minor breaking changes (acceptable with deprecation)"
+        - "Major breaking changes required"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: pre-commit-compatibility
+    attributes:
+      label: Python pre-commit Compatibility
+      description: How should this feature interact with Python pre-commit compatibility?
+      options:
+        - label: This feature should maintain 100% compatibility with Python pre-commit
+        - label: This feature is SNP-specific and doesn't need Python pre-commit compatibility
+        - label: This feature could enhance compatibility with Python pre-commit
+        - label: Not applicable
+
+  - type: checkboxes
+    id: affected-components
+    attributes:
+      label: Affected Components
+      description: Which parts of SNP would this feature likely affect? (Check all that apply)
+      options:
+        - label: CLI interface
+        - label: Configuration parsing
+        - label: Hook execution engine
+        - label: Language plugins
+        - label: File processing
+        - label: Git operations
+        - label: Performance/concurrency
+        - label: Error handling
+        - label: Logging/output
+        - label: Testing framework
+        - label: Documentation
+
+  - type: dropdown
+    id: implementation-complexity
+    attributes:
+      label: Implementation Complexity
+      description: How complex do you think implementing this feature would be?
+      options:
+        - "Simple (few lines of code)"
+        - "Moderate (single component changes)"
+        - "Complex (multiple component changes)"
+        - "Very complex (architectural changes)"
+        - "Not sure"
+    validations:
+      required: false
+
+  - type: textarea
+    id: technical-details
+    attributes:
+      label: Technical Implementation Details
+      description: If you have technical knowledge, share any implementation ideas or considerations
+      placeholder: |
+        This could be implemented by...
+        We might need to consider...
+        Potential challenges include...
+    validations:
+      required: false
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and Requirements
+      description: Are there any external dependencies or requirements for this feature?
+      placeholder: |
+        This feature would require:
+        - Integration with X API
+        - New dependency on library Y
+        - Changes to file format Z
+    validations:
+      required: false
+
+  - type: dropdown
+    id: target-users
+    attributes:
+      label: Target Users
+      description: Who would primarily benefit from this feature?
+      multiple: true
+      options:
+        - "Individual developers"
+        - "Small teams (2-10 people)"
+        - "Large teams (10+ people)"
+        - "Open source projects"
+        - "Enterprise users"
+        - "CI/CD systems"
+        - "Tool integrators"
+
+  - type: textarea
+    id: success-criteria
+    attributes:
+      label: Success Criteria
+      description: How would you measure the success of this feature?
+      placeholder: |
+        This feature would be successful if:
+        - Users can accomplish X in Y steps
+        - Performance improves by Z%
+        - Adoption increases among target users
+    validations:
+      required: false
+
+  - type: textarea
+    id: related-issues
+    attributes:
+      label: Related Issues/Discussions
+      description: Link any related issues, discussions, or external references
+      placeholder: |
+        Related to issue #123
+        Similar discussion: https://github.com/...
+        External reference: https://...
+    validations:
+      required: false
+
+  - type: dropdown
+    id: urgency
+    attributes:
+      label: Timeline
+      description: When do you need this feature?
+      options:
+        - "No specific timeline"
+        - "Would be nice for next minor release"
+        - "Needed for next major release"
+        - "Urgent - blocking current work"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      description: Would you be willing to help implement this feature?
+      options:
+        - label: I would be willing to submit a pull request to implement this feature
+        - label: I would be willing to help with testing and feedback
+        - label: I would be willing to help with documentation
+        - label: I can provide domain expertise but can't code
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Add any other context, mockups, or examples that would help
+      placeholder: "Any additional information that might be helpful..."
+    validations:
+      required: false

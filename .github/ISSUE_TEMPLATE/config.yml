@@ -1,0 +1,20 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 GitHub Discussions
+    url: https://github.com/devops247-online/snp/discussions
+    about: Ask questions, share ideas, and discuss SNP with the community
+  - name: 📖 Documentation
+    url: https://docs.rs/snp
+    about: Read the comprehensive API documentation and user guides
+  - name: 🚀 Quick Start Guide
+    url: https://github.com/devops247-online/snp#-quick-start
+    about: Get started with SNP in minutes
+  - name: 🔄 Migration Guide
+    url: https://github.com/devops247-online/snp/wiki/Migration-from-pre-commit
+    about: Migrate from Python pre-commit to SNP
+  - name: 🛠️ Troubleshooting
+    url: https://github.com/devops247-online/snp/wiki/Troubleshooting
+    about: Common issues and solutions
+  - name: 🔒 Security Issues
+    url: https://github.com/devops247-online/snp/security/advisories/new
+    about: Report critical security vulnerabilities privately

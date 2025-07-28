@@ -2,8 +2,9 @@
 // Provides environment setup, file filtering, process execution, output collection, and result aggregation
 
 use crate::concurrency::{ConcurrencyExecutor, ResourceLimits, TaskConfig, TaskPriority};
-use crate::core::{ExecutionContext, Hook, Stage};
+use crate::core::{ArenaExecutionContext, ExecutionContext, Hook, Stage};
 use crate::error::{HookExecutionError, Result};
+use crate::file_change_detector::{FileChangeDetector, FileChangeDetectorConfig};
 use crate::language::environment::{EnvironmentConfig, EnvironmentManager, LanguageEnvironment};
 use crate::language::registry::LanguageRegistry;
 use crate::process::ProcessManager;
@@ -12,7 +13,10 @@ use futures::future::BoxFuture;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
+
+// Arena allocation for performance optimization
+use bumpalo::Bump;
 
 /// Hook execution configuration
 #[derive(Debug, Clone)]
@@ -28,6 +32,7 @@ pub struct ExecutionConfig {
     pub color: bool,
     pub user_output: Option<crate::user_output::UserOutput>,
     pub working_directory: Option<PathBuf>,
+    pub incremental_config: Option<FileChangeDetectorConfig>,
 }
 
 impl ExecutionConfig {
@@ -44,6 +49,7 @@ impl ExecutionConfig {
             color: true,
             user_output: None,
             working_directory: None,
+            incremental_config: None,
         }
     }
 
@@ -84,6 +90,11 @@ impl ExecutionConfig {
 
     pub fn with_max_parallel_hooks(mut self, max_parallel_hooks: usize) -> Self {
         self.max_parallel_hooks = max_parallel_hooks;
+        self
+    }
+
+    pub fn with_incremental_config(mut self, config: FileChangeDetectorConfig) -> Self {
+        self.incremental_config = Some(config);
         self
     }
 }
@@ -260,6 +271,7 @@ pub struct HookExecutionEngine {
     concurrency_executor: Arc<ConcurrencyExecutor>,
     hook_cache: Arc<Mutex<HashMap<String, HookCacheEntry>>>,
     environment_cache: Arc<Mutex<HashMap<String, EnvironmentCacheEntry>>>,
+    file_change_detector: Arc<Mutex<Option<Arc<FileChangeDetector>>>>,
 }
 
 impl HookExecutionEngine {
@@ -292,6 +304,7 @@ impl HookExecutionEngine {
             concurrency_executor,
             hook_cache: Arc::new(Mutex::new(HashMap::new())),
             environment_cache: Arc::new(Mutex::new(HashMap::new())),
+            file_change_detector: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -310,25 +323,43 @@ impl HookExecutionEngine {
             return Ok(result);
         }
 
-        // Filter files for this hook
-        let execution_context = ExecutionContext::new(config.stage.clone())
-            .with_files(files.to_vec())
-            .with_verbose(config.verbose);
+        // Filter files for this hook using arena allocation for better performance
+        let arena = Bump::new();
 
-        let filtered_files = execution_context.filtered_files(hook)?;
+        // Create arena-based execution context to reduce heap allocations
+        let arena_context = ArenaExecutionContext::new(
+            &arena,
+            config.stage.clone(),
+            files.to_vec(),
+            std::collections::HashMap::new(), // Empty environment for now
+        )
+        .with_verbose(config.verbose);
+
+        let filtered_files_arena = arena_context.filtered_files(hook)?;
+
+        // Convert arena slice back to Vec for compatibility with existing code
+        let filtered_files = filtered_files_arena.to_vec();
+
+        // Apply incremental file change detection if enabled
+        let changed_files = if let Some(ref incremental_config) = config.incremental_config {
+            self.apply_incremental_detection(&filtered_files, incremental_config)
+                .await?
+        } else {
+            filtered_files.clone()
+        };
 
         // Skip if no files match and not always_run
-        if filtered_files.is_empty() && !hook.always_run {
+        if changed_files.is_empty() && !hook.always_run {
             let _duration = start_time.elapsed().unwrap_or_default();
             return Ok(result.skipped().with_files(vec![], vec![]));
         }
 
         // Check cache for existing result
-        if let Some(cached_result) = self.check_cache(hook, &filtered_files) {
+        if let Some(cached_result) = self.check_cache(hook, &changed_files) {
             return Ok(cached_result);
         }
 
-        result.files_processed = filtered_files.clone();
+        result.files_processed = changed_files.clone();
 
         // Determine the language for this hook (default to "system" for most pre-commit hooks)
         let language = if hook.language.is_empty() {
@@ -359,12 +390,13 @@ impl HookExecutionEngine {
         }
 
         // Check if this hook needs repository installation
-        // If the hook entry is not a system command (doesn't start with / and not in PATH),
-        // we need to find and install it from a repository
+        // Script language always needs repository path to locate script files
+        // For other languages, check if the entry is not a system command
         let executable_name = hook.entry.split_whitespace().next().unwrap_or(&hook.entry);
-        let needs_repo_installation = !hook.entry.starts_with('/')
-            && !hook.entry.contains('/')
-            && which::which(executable_name).is_err();
+        let needs_repo_installation = hook.language == "script"
+            || (!hook.entry.starts_with('/')
+                && !hook.entry.contains('/')
+                && which::which(executable_name).is_err());
 
         if needs_repo_installation {
             // Try to find the repository that contains this hook
@@ -385,7 +417,7 @@ impl HookExecutionEngine {
         // Execute hook through language plugin
         tracing::debug!("Executing hook {} through language plugin", hook.id);
         let mut hook_result = language_plugin
-            .execute_hook(hook, &environment, &filtered_files)
+            .execute_hook(hook, &environment, &changed_files)
             .await?;
         tracing::debug!("Hook {} execution completed", hook.id);
 
@@ -395,7 +427,7 @@ impl HookExecutionEngine {
 
         // Store successful results in cache
         if hook_result.success {
-            self.store_in_cache(hook, &filtered_files, &hook_result);
+            self.store_in_cache(hook, &changed_files, &hook_result);
         }
 
         Ok(hook_result)
@@ -520,10 +552,13 @@ impl HookExecutionEngine {
             };
 
             // Check if this hook needs repository installation
+            // Script language always needs repository path to locate script files
+            // For other languages, check if the entry is not a system command
             let executable_name = hook.entry.split_whitespace().next().unwrap_or(&hook.entry);
-            let needs_repo_installation = !hook.entry.starts_with('/')
-                && !hook.entry.contains('/')
-                && which::which(executable_name).is_err();
+            let needs_repo_installation = hook.language == "script"
+                || (!hook.entry.starts_with('/')
+                    && !hook.entry.contains('/')
+                    && which::which(executable_name).is_err());
 
             let repository_path = if needs_repo_installation {
                 self.find_repository_for_hook(&hook.id).await?
@@ -570,6 +605,7 @@ impl HookExecutionEngine {
         tracing::debug!("Pre-setting up environments for {} groups", groups.len());
 
         for group in groups {
+            let setup_start = Instant::now();
             tracing::debug!(
                 "Setting up environment for language: {} with {} hooks",
                 group.language,
@@ -595,9 +631,34 @@ impl HookExecutionEngine {
             let env_key = self.generate_environment_cache_key(&group.language, &group.dependencies);
 
             // Setup environment (this will use the existing caching mechanism)
-            let environment = self
+            let environment = match self
                 .get_or_create_environment(&group.language, &env_config, &group.dependencies)
-                .await?;
+                .await
+            {
+                Ok(env) => {
+                    let setup_time = setup_start.elapsed();
+                    tracing::debug!(
+                        "Environment setup for {} completed in {:?}",
+                        group.language,
+                        setup_time
+                    );
+                    env
+                }
+                Err(e) => {
+                    let setup_time = setup_start.elapsed();
+                    tracing::error!(
+                        "Failed to setup environment for language '{}' after {:?}: {}",
+                        group.language,
+                        setup_time,
+                        e
+                    );
+                    tracing::debug!(
+                        "Affected hooks: {:?}",
+                        group.hooks.iter().map(|h| &h.id).collect::<Vec<_>>()
+                    );
+                    return Err(e);
+                }
+            };
 
             environments.insert(env_key, environment);
         }
@@ -1075,6 +1136,49 @@ impl HookExecutionEngine {
         Ok(hook_result)
     }
 
+    /// Apply incremental file change detection to filter files
+    async fn apply_incremental_detection(
+        &self,
+        files: &[PathBuf],
+        config: &FileChangeDetectorConfig,
+    ) -> Result<Vec<PathBuf>> {
+        // Get or create file change detector
+        {
+            let mut detector_guard = self.file_change_detector.lock().unwrap();
+
+            // Initialize detector if not already done
+            if detector_guard.is_none() {
+                let detector = FileChangeDetector::new(config.clone(), Arc::clone(&self.storage))?;
+
+                // Start watching if enabled
+                if config.watch_filesystem {
+                    // For now, watch current directory. In a real implementation,
+                    // we might want to watch the repository root or specific paths
+                    let watch_paths =
+                        vec![std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))];
+                    detector.start_watching(&watch_paths)?;
+                }
+
+                *detector_guard = Some(Arc::new(detector));
+            }
+        }
+
+        // Apply change detection
+        let detector = {
+            let detector_guard = self.file_change_detector.lock().unwrap();
+            Arc::clone(detector_guard.as_ref().unwrap())
+        };
+        let changed_files = detector.get_changed_files(files).await?;
+
+        tracing::debug!(
+            "Incremental detection: {} of {} files changed",
+            changed_files.len(),
+            files.len()
+        );
+
+        Ok(changed_files)
+    }
+
     /// Create a HookExecutionEngine from existing components (for parallel execution)
     #[allow(dead_code)]
     fn from_components(
@@ -1101,6 +1205,7 @@ impl HookExecutionEngine {
             concurrency_executor,
             hook_cache: Arc::new(Mutex::new(HashMap::new())),
             environment_cache: Arc::new(Mutex::new(HashMap::new())),
+            file_change_detector: Arc::new(Mutex::new(None)),
         }
     }
 }

@@ -3,113 +3,258 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v1.0.0)'
+        required: true
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
+  # Create the GitHub release
   create-release:
-    name: Create Release
+    name: Create release
     runs-on: ubuntu-latest
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
+      release_id: ${{ steps.create_release.outputs.id }}
     steps:
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ github.ref }}
-        draft: false
-        prerelease: false
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-  build-and-upload:
-    name: Build and Upload
-    needs: create-release
+      - name: Get release tag
+        id: get_tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Extract changelog
+        id: changelog
+        run: |
+          # Extract changelog section for this version
+          VERSION="${{ steps.get_tag.outputs.tag }}"
+          VERSION="${VERSION#v}"  # Remove 'v' prefix if present
+
+          # Create release notes from changelog
+          if [ -f CHANGELOG.md ]; then
+            # Extract the section for this version
+            awk "/^## \[$VERSION\]/{flag=1; next} /^## \[/{flag=0} flag" CHANGELOG.md > release_notes.md
+
+            # If no specific section found, use unreleased section
+            if [ ! -s release_notes.md ]; then
+              awk "/^## \[Unreleased\]/{flag=1; next} /^## \[/{flag=0} flag" CHANGELOG.md > release_notes.md
+            fi
+
+            # Add header if content exists
+            if [ -s release_notes.md ]; then
+              echo "## Changes" > temp_notes.md
+              cat release_notes.md >> temp_notes.md
+              mv temp_notes.md release_notes.md
+            else
+              echo "Release $VERSION" > release_notes.md
+            fi
+          else
+            echo "Release $VERSION" > release_notes.md
+          fi
+
+          # Set multiline output
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          cat release_notes.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_tag.outputs.tag }}
+          name: ${{ steps.get_tag.outputs.tag }}
+          body: ${{ steps.changelog.outputs.notes }}
+          draft: false
+          prerelease: ${{ contains(steps.get_tag.outputs.tag, '-') }}
+
+  # Build binaries for each platform
+  build:
+    name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    needs: create-release
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            binary: snp
-            name: snp-linux-x86_64.tar.gz
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            binary: snp
-            name: snp-linux-x86_64-musl.tar.gz
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            binary: snp.exe
-            name: snp-windows-x86_64.zip
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            binary: snp
-            name: snp-macos-x86_64.tar.gz
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            binary: snp
-            name: snp-macos-aarch64.tar.gz
+          # Linux (x86_64, musl for static linking)
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+
+          # Linux (aarch64)
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+
+          # macOS (Intel)
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            cross: false
+
+          # macOS (Apple Silicon)
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            cross: false
+
+          # Windows (x86_64)
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            cross: false
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: ${{ matrix.target }}
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
-    - name: Install cross-compilation tools
-      if: matrix.target == 'x86_64-unknown-linux-musl'
-      run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Install cross-compilation tools
+        if: matrix.cross
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
 
-    - name: Cache dependencies
-      uses: Swatinem/rust-cache@v2
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
-    - name: Build release
-      run: cargo build --release --target ${{ matrix.target }}
+      - name: Build binary (native)
+        if: '!matrix.cross'
+        run: |
+          cargo build --release --target ${{ matrix.target }}
 
-    - name: Package (Unix)
-      if: runner.os != 'Windows'
-      run: |
-        cd target/${{ matrix.target }}/release
-        tar czf ../../../${{ matrix.name }} ${{ matrix.binary }}
-        cd -
+      - name: Build binary (cross)
+        if: matrix.cross
+        run: |
+          cross build --release --target ${{ matrix.target }}
 
-    - name: Package (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        cd target/${{ matrix.target }}/release
-        7z a ../../../${{ matrix.name }} ${{ matrix.binary }}
-        cd -
+      - name: Package binary (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../snp-${{ matrix.target }}.tar.gz snp
+          cd ../../..
 
-    - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: ./${{ matrix.name }}
-        asset_name: ${{ matrix.name }}
-        asset_content_type: application/octet-stream
+      - name: Package binary (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cd target/${{ matrix.target }}/release
+          7z a ../../../snp-${{ matrix.target }}.zip snp.exe
+          cd ../../..
 
-  publish-crate:
+      - name: Generate checksums (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          shasum -a 256 snp-${{ matrix.target }}.tar.gz > snp-${{ matrix.target }}.tar.gz.sha256
+
+      - name: Generate checksums (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          Get-FileHash snp-${{ matrix.target }}.zip -Algorithm SHA256 | ForEach-Object { $_.Hash.ToLower() + "  snp-${{ matrix.target }}.zip" } | Out-File -Encoding ascii snp-${{ matrix.target }}.zip.sha256
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.create-release.outputs.tag_name }}
+          files: |
+            snp-${{ matrix.target }}.*
+
+  # Publish to crates.io using Trusted Publishing
+  publish-crates:
     name: Publish to crates.io
-    needs: create-release
     runs-on: ubuntu-latest
+    needs: [create-release, build]
+    environment: release
+    permissions:
+      id-token: write
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-    - name: Cache dependencies
-      uses: Swatinem/rust-cache@v2
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
-    - name: Publish to crates.io
-      run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Run tests
+        run: cargo test --all-features
+
+      - name: Check documentation
+        run: cargo doc --no-deps
+
+      - name: Dry run publish
+        run: cargo publish --dry-run
+
+      - name: Publish to crates.io
+        run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+
+  # Create installation checksums summary
+  create-checksums:
+    name: Create checksums summary
+    runs-on: ubuntu-latest
+    needs: [create-release, build]
+    steps:
+      - name: Get release tag
+        id: get_tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download release assets
+        uses: robinraju/release-downloader@v1.11
+        with:
+          tag: ${{ steps.get_tag.outputs.tag }}
+          fileName: "*.sha256"
+          out-file-path: "checksums"
+
+      - name: Create checksums summary
+        run: |
+          echo "# SHA256 Checksums for SNP ${{ steps.get_tag.outputs.tag }}" > CHECKSUMS.txt
+          echo "" >> CHECKSUMS.txt
+          echo "Verify downloads with:" >> CHECKSUMS.txt
+          echo "\`\`\`bash" >> CHECKSUMS.txt
+          echo "# Linux/macOS" >> CHECKSUMS.txt
+          echo "shasum -a 256 -c CHECKSUMS.txt" >> CHECKSUMS.txt
+          echo "" >> CHECKSUMS.txt
+          echo "# Windows PowerShell" >> CHECKSUMS.txt
+          echo "# Verify each file individually" >> CHECKSUMS.txt
+          echo "\`\`\`" >> CHECKSUMS.txt
+          echo "" >> CHECKSUMS.txt
+
+          # Combine all checksums
+          for file in checksums/*.sha256; do
+            if [ -f "$file" ]; then
+              cat "$file" >> CHECKSUMS.txt
+            fi
+          done
+
+      - name: Upload checksums summary
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_tag.outputs.tag }}
+          files: CHECKSUMS.txt

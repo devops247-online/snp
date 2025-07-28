@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
+use regex::Regex;
 
 /// TDD Red Phase: These tests should fail initially
 /// Following issue #2 requirements for basic CLI functionality
@@ -23,10 +24,20 @@ fn test_version_flag_works() {
     let mut cmd = Command::cargo_bin("snp").unwrap();
     cmd.arg("--version");
 
-    cmd.assert()
+    let assert = cmd
+        .assert()
         .success()
-        .stdout(predicate::str::contains("snp"))
-        .stdout(predicate::str::contains("0.1.0"));
+        .stdout(predicate::str::contains("snp"));
+
+    let output = assert.get_output();
+    let stdout = String::from_utf8(output.stdout.clone()).unwrap();
+
+    // Verify the output contains a semantic version (X.Y.Z format)
+    let version_regex = Regex::new(r"\d+\.\d+\.\d+").unwrap();
+    assert!(
+        version_regex.is_match(&stdout),
+        "Version output should contain semantic version format (X.Y.Z)"
+    );
 }
 
 #[test]

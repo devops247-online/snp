@@ -134,6 +134,9 @@ impl LanguageRegistry {
         let ruby_plugin = Arc::new(super::ruby::RubyLanguagePlugin::new());
         self.register_plugin(ruby_plugin)?;
 
+        let script_plugin = Arc::new(super::script::ScriptLanguagePlugin::new());
+        self.register_plugin(script_plugin)?;
+
         Ok(())
     }
 

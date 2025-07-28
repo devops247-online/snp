@@ -9,6 +9,7 @@ pub mod config;
 pub mod core;
 pub mod error;
 pub mod execution;
+pub mod file_change_detector;
 pub mod file_lock;
 pub mod filesystem;
 pub mod git;
@@ -33,13 +34,14 @@ pub use concurrency::{
     BatchResult, ConcurrencyExecutor, ErrorAggregator, ResourceGuard, ResourceLimits,
     ResourceRequirements, ResourceUsage, TaskConfig, TaskPriority, TaskResult, TaskState,
 };
-pub use config::Config;
+pub use config::{Config, IncrementalConfig};
 pub use core::{ExecutionContext, Hook, Repository, Stage};
 pub use error::{
     exit_codes, CliError, ConfigError, GitError, HookChainingError, HookExecutionError, LockError,
     ProcessError, Result, SnpError, StorageError,
 };
 pub use execution::{ExecutionConfig, ExecutionResult, HookExecutionEngine, HookExecutionResult};
+pub use file_change_detector::{FileChangeDetector, FileChangeDetectorConfig};
 pub use file_lock::{
     ConfigFileLock, FileLock, FileLockManager, LockBehavior, LockConfig, LockHierarchy, LockInfo,
     LockMetrics, LockOrdering, LockStatus, LockType, StaleLockDetector, TempFileLock,
@@ -98,13 +100,46 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const NAME: &str = env!("CARGO_PKG_NAME");
 pub const DESCRIPTION: &str = env!("CARGO_PKG_DESCRIPTION");
 
+// Build information (set by build script)
+pub const BUILD_DATE: &str = env!("BUILD_DATE");
+pub const GIT_COMMIT: &str = env!("GIT_COMMIT");
+pub const GIT_BRANCH: &str = env!("GIT_BRANCH");
+pub const RUST_VERSION: &str = env!("RUST_VERSION");
+
+/// Get formatted version string with build information
+pub fn version_info() -> String {
+    format!(
+        "{NAME} {VERSION} (commit: {GIT_COMMIT}, branch: {GIT_BRANCH}, built: {BUILD_DATE}, rustc: {RUST_VERSION})"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_version_constant() {
-        assert_eq!(VERSION, "0.1.0");
+        // Verify VERSION follows semantic versioning format (X.Y.Z or X.Y.Z-suffix)
+        let parts: Vec<&str> = VERSION.split('.').collect();
+        assert!(
+            parts.len() >= 3,
+            "VERSION '{VERSION}' should have at least 3 parts separated by dots (X.Y.Z)"
+        );
+
+        // Check that first three parts are numbers
+        for (i, part) in parts.iter().take(3).enumerate() {
+            let number_part = if i == 2 {
+                // Third part might have a suffix (e.g., "0-alpha1")
+                part.split('-').next().unwrap_or(part)
+            } else {
+                part
+            };
+
+            assert!(
+                number_part.chars().all(|c| c.is_ascii_digit()),
+                "VERSION '{VERSION}' part '{number_part}' should be a number"
+            );
+        }
     }
 
     #[test]
@@ -115,6 +150,7 @@ mod tests {
     #[test]
     fn test_description_exists() {
         // DESCRIPTION is a const string that's never empty
-        assert!(DESCRIPTION.contains("Shell Not Pass"));
+        assert!(DESCRIPTION.contains("pre-commit framework"));
+        assert!(DESCRIPTION.contains("Rust"));
     }
 }

@@ -1,0 +1,342 @@
+name: ⚡ Performance Issue
+description: Report performance problems or suggest performance improvements
+title: "[Performance]: "
+labels: ["performance", "needs-triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a performance issue! Performance is a key advantage of SNP, so we take these reports seriously. Please provide detailed information to help us reproduce and optimize the issue.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-flight Checklist
+      description: Please check that you've done the following before submitting this performance issue
+      options:
+        - label: I have searched existing issues to ensure this performance issue hasn't already been reported
+          required: true
+        - label: I have tested with the latest version of SNP
+          required: true
+        - label: I have compared performance with Python pre-commit (if applicable)
+          required: false
+
+  - type: dropdown
+    id: performance-type
+    attributes:
+      label: Performance Issue Type
+      description: What type of performance issue are you reporting?
+      options:
+        - "Slow hook execution"
+        - "High memory usage"
+        - "Slow startup time"
+        - "Inefficient file processing"
+        - "Slow configuration parsing"
+        - "Poor concurrency/parallelization"
+        - "Regression from previous version"
+        - "General performance suggestion"
+    validations:
+      required: true
+
+  - type: input
+    id: snp-version
+    attributes:
+      label: SNP Version
+      description: What version of SNP are you using? Run `snp --version` to find out.
+      placeholder: "snp 1.0.0 (commit: abc123, branch: main, built: 2024-01-01, rustc: 1.75.0)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating System
+      description: What operating system are you using?
+      options:
+        - "Linux"
+        - "macOS"
+        - "Windows"
+        - "Other (please specify)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: system-specs
+    attributes:
+      label: System Specifications
+      description: Please provide your system specifications
+      placeholder: |
+        - CPU: Intel i7-10700K 8-core 3.8GHz
+        - RAM: 32GB DDR4
+        - Storage: NVMe SSD
+        - OS: Ubuntu 22.04 LTS
+        - Filesystem: ext4
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: repository-info
+    attributes:
+      label: Repository Information
+      description: Details about the repository where you're experiencing the performance issue
+      placeholder: |
+        - Repository size: ~5000 files
+        - Repository type: Monorepo / Single project
+        - Languages: Python, JavaScript, Rust
+        - Typical file sizes: Mostly < 1KB, some > 100KB
+        - Git history: 2 years, ~1000 commits
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: pre-commit-config
+    attributes:
+      label: Pre-commit Configuration
+      description: Please paste your `.pre-commit-config.yaml` file content
+      placeholder: |
+        repos:
+          - repo: https://github.com/psf/black
+            rev: 23.9.1
+            hooks:
+              - id: black
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: performance-description
+    attributes:
+      label: Performance Issue Description
+      description: Describe the performance problem you're experiencing
+      placeholder: |
+        When running `snp run`, the execution takes much longer than expected...
+        The issue occurs specifically when...
+    validations:
+      required: true
+
+  - type: textarea
+    id: timing-measurements
+    attributes:
+      label: Timing Measurements
+      description: Provide specific timing measurements if available
+      placeholder: |
+        SNP execution time: 45 seconds
+        Python pre-commit execution time: 30 seconds
+        Expected execution time: < 15 seconds
+
+        Breakdown by hook:
+        - black: 20 seconds
+        - flake8: 15 seconds
+        - mypy: 10 seconds
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: Steps to Reproduce
+      description: Detailed steps to reproduce the performance issue
+      placeholder: |
+        1. Clone repository with X characteristics
+        2. Set up .pre-commit-config.yaml with hooks...
+        3. Run `snp install`
+        4. Run `time snp run --all-files`
+        5. Observe execution time of X seconds
+    validations:
+      required: true
+
+  - type: textarea
+    id: verbose-output
+    attributes:
+      label: Verbose Output
+      description: Run SNP with `--verbose` flag and paste relevant timing information
+      placeholder: "Run `snp --verbose run` and paste timing-related output here..."
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: comparison-data
+    attributes:
+      label: Performance Comparison
+      description: How does SNP performance compare to Python pre-commit or previous SNP versions?
+      placeholder: |
+        Python pre-commit performance:
+        - Total time: 30 seconds
+        - Memory usage: 200MB peak
+
+        SNP performance:
+        - Total time: 45 seconds
+        - Memory usage: 150MB peak
+
+        Previous SNP version (if applicable):
+        - Version: 0.9.0
+        - Total time: 25 seconds
+    validations:
+      required: false
+
+  - type: dropdown
+    id: files-affected
+    attributes:
+      label: Number of Files Processed
+      description: Approximately how many files are being processed?
+      options:
+        - "< 10 files"
+        - "10-100 files"
+        - "100-1,000 files"
+        - "1,000-10,000 files"
+        - "> 10,000 files"
+        - "Not sure"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: hook-count
+    attributes:
+      label: Number of Hooks
+      description: How many hooks are configured in your setup?
+      options:
+        - "1-3 hooks"
+        - "4-10 hooks"
+        - "11-20 hooks"
+        - "> 20 hooks"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: resource-usage
+    attributes:
+      label: Resource Usage Patterns
+      description: What resource usage patterns have you observed? (Check all that apply)
+      options:
+        - label: High CPU usage during execution
+        - label: High memory usage during execution
+        - label: High disk I/O
+        - label: Network requests causing delays
+        - label: Long startup time before hooks begin
+        - label: Inefficient parallel processing
+        - label: Memory usage grows over time
+
+  - type: textarea
+    id: profiling-data
+    attributes:
+      label: Profiling Data
+      description: If you have profiling data (CPU, memory, etc.), please share it
+      placeholder: |
+        Attach profiling reports, flame graphs, or other performance analysis data...
+        You can use tools like `perf`, `htop`, Activity Monitor, etc.
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment-factors
+    attributes:
+      label: Environment Factors
+      description: Any environmental factors that might affect performance?
+      placeholder: |
+        - Running in Docker container
+        - Network filesystem (NFS, etc.)
+        - Virtual machine
+        - CI/CD environment
+        - Antivirus software
+        - Low disk space
+    validations:
+      required: false
+
+  - type: dropdown
+    id: concurrency-settings
+    attributes:
+      label: Concurrency Settings
+      description: Are you using any specific concurrency or parallelization settings?
+      options:
+        - "Default settings"
+        - "Custom parallel limits set"
+        - "Disabled parallelization"
+        - "Not sure"
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected-performance
+    attributes:
+      label: Expected Performance
+      description: What performance would you expect for your use case?
+      placeholder: |
+        Given my repository size and configuration, I would expect:
+        - Total execution time: < 10 seconds
+        - Memory usage: < 100MB
+        - Startup time: < 1 second
+    validations:
+      required: false
+
+  - type: textarea
+    id: optimization-ideas
+    attributes:
+      label: Optimization Ideas
+      description: Do you have any ideas for potential optimizations?
+      placeholder: |
+        Potential optimizations could include:
+        - Better caching of file analysis
+        - More efficient file filtering
+        - Improved parallelization strategy
+    validations:
+      required: false
+
+  - type: dropdown
+    id: regression
+    attributes:
+      label: Performance Regression
+      description: Is this a performance regression from a previous version?
+      options:
+        - "Not sure"
+        - "Yes, performance was better in previous version"
+        - "No, this is my first time using SNP"
+        - "Performance has been consistent"
+    validations:
+      required: false
+
+  - type: input
+    id: last-good-version
+    attributes:
+      label: Last Good Performance Version
+      description: If this is a regression, what was the last version with good performance?
+      placeholder: "e.g., 0.9.5"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: impact-level
+    attributes:
+      label: Impact Level
+      description: How much does this performance issue impact your workflow?
+      options:
+        - "Minor inconvenience"
+        - "Noticeable but manageable"
+        - "Significantly slows down work"
+        - "Blocks adoption of SNP"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other context, data files, or information that might help
+      placeholder: "Any additional information that might be helpful..."
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      description: Would you be willing to help optimize this performance issue?
+      options:
+        - label: I would be willing to help with profiling and data collection
+        - label: I would be willing to test performance improvements
+        - label: I would be willing to submit a pull request with optimizations
