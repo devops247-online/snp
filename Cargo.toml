@@ -119,6 +119,7 @@ pep440_rs = "0.7"        # PEP 440 version specifier parsing
 crossbeam = "0.8"
 rayon = "1.7"
 num_cpus = "1.16"
+arc-swap = "1.6"  # Atomic pointer updates for lock-free configuration
 
 # System monitoring
 sysinfo = "0.36"
