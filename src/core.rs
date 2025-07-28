@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::error::{ConfigError, Result, SnpError};
-use crate::filesystem::FileFilter;
+use crate::filesystem::{AsyncConfig, FileFilter};
 
 // Arena allocation imports for performance optimization
 use bumpalo::collections::Vec as BumpVec;
@@ -598,6 +598,20 @@ impl ExecutionContext {
 
         let filter = hook.file_filter()?;
         filter.filter_files(&self.files)
+    }
+
+    /// Async version of filtered_files with configurable concurrency
+    pub async fn filtered_files_async(
+        &self,
+        hook: &Hook,
+        config: Option<AsyncConfig>,
+    ) -> Result<Vec<PathBuf>> {
+        if hook.always_run {
+            return Ok(self.files.clone());
+        }
+
+        let filter = hook.file_filter()?;
+        filter.filter_files_async(&self.files, config).await
     }
 }
 

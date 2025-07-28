@@ -2,12 +2,17 @@
 // Provides comprehensive Git integration including repository detection,
 // file enumeration, and hook installation
 
-use crate::error::{GitError, Result, SnpError};
+use crate::error::{ConfigError, GitError, Result, SnpError};
+use crate::filesystem::AsyncConfig;
+
+use futures::stream::{self, StreamExt};
 use git2::{DiffOptions, Oid, Repository, Status, StatusOptions};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
 
 /// Configuration for Git operations
@@ -1223,6 +1228,102 @@ impl FileProcessor {
         Ok(filtered_files)
     }
 
+    /// Async version of filter_files with configurable concurrency
+    pub async fn filter_files_async(
+        &self,
+        files: &[PathBuf],
+        filter: &FileFilter,
+        config: Option<AsyncConfig>,
+    ) -> Result<Vec<PathBuf>> {
+        let config = config.unwrap_or_default();
+        let semaphore = Arc::new(Semaphore::new(config.max_concurrent_files));
+
+        let results = stream::iter(files)
+            .map(|file| {
+                let sem = Arc::clone(&semaphore);
+                let file = file.clone();
+
+                async move {
+                    let _permit = sem.acquire().await.map_err(|e| {
+                        SnpError::Config(Box::new(ConfigError::IOError {
+                            message: format!("Failed to acquire semaphore permit: {e}"),
+                            path: Some(file.clone()),
+                        }))
+                    })?;
+
+                    // Add timeout wrapper for I/O operations
+                    let timeout_duration = config.io_timeout;
+                    let result =
+                        tokio::time::timeout(timeout_duration, filter.matches_async(&file)).await;
+
+                    match result {
+                        Ok(Ok(matches)) => {
+                            if matches {
+                                Ok(Some(file))
+                            } else {
+                                Ok(None)
+                            }
+                        }
+                        Ok(Err(e)) => Err(e),
+                        Err(_) => Err(SnpError::Config(Box::new(ConfigError::IOError {
+                            message: format!("File operation timed out after {timeout_duration:?}"),
+                            path: Some(file),
+                        }))),
+                    }
+                }
+            })
+            .buffer_unordered(config.max_concurrent_files)
+            .collect::<Vec<_>>()
+            .await;
+
+        // Collect successful results and handle errors
+        let mut filtered_files = Vec::new();
+        for result in results {
+            match result {
+                Ok(Some(file)) => filtered_files.push(file),
+                Ok(None) => {} // File didn't match filter
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(filtered_files)
+    }
+
+    /// Async versions of main methods using the new async file processing
+    pub async fn get_files_for_hooks_async(
+        &mut self,
+        hooks: &[crate::core::Hook],
+        mode: ProcessingMode,
+        config: Option<AsyncConfig>,
+    ) -> Result<HashMap<String, Vec<PathBuf>>> {
+        let mut results = HashMap::new();
+
+        let discovered_files = self.discover_files(mode)?;
+
+        for hook in hooks {
+            let filter = FileFilter::from_hook(hook)?;
+            let filtered_files = self
+                .filter_files_async(&discovered_files, &filter, config.clone())
+                .await?;
+            results.insert(hook.id.clone(), filtered_files);
+        }
+
+        Ok(results)
+    }
+
+    /// Async version of get_files_for_hook
+    pub async fn get_files_for_hook_async(
+        &mut self,
+        hook: &crate::core::Hook,
+        mode: ProcessingMode,
+        config: Option<AsyncConfig>,
+    ) -> Result<Vec<PathBuf>> {
+        let discovered_files = self.discover_files(mode)?;
+        let filter = FileFilter::from_hook(hook)?;
+        self.filter_files_async(&discovered_files, &filter, config)
+            .await
+    }
+
     /// Warm cache for multiple hooks
     pub fn warm_cache(&mut self, hooks: &[crate::core::Hook]) -> Result<()> {
         // Pre-compute common file lists
@@ -1340,6 +1441,49 @@ impl FileFilter {
         // Check file size
         if let Some(max_size) = self.max_file_size {
             if let Ok(metadata) = std::fs::metadata(file) {
+                if metadata.len() > max_size {
+                    return Ok(false);
+                }
+            }
+        }
+
+        Ok(true)
+    }
+
+    /// Async version of matches for individual file checking
+    pub async fn matches_async(&self, file: &Path) -> Result<bool> {
+        use regex::Regex;
+
+        let file_str = file.to_string_lossy();
+
+        // Check include patterns (no I/O needed)
+        if !self.include_patterns.is_empty() {
+            let mut matches_include = false;
+            for pattern in &self.include_patterns {
+                if let Ok(regex) = Regex::new(pattern) {
+                    if regex.is_match(&file_str) {
+                        matches_include = true;
+                        break;
+                    }
+                }
+            }
+            if !matches_include {
+                return Ok(false);
+            }
+        }
+
+        // Check exclude patterns (no I/O needed)
+        for pattern in &self.exclude_patterns {
+            if let Ok(regex) = Regex::new(pattern) {
+                if regex.is_match(&file_str) {
+                    return Ok(false);
+                }
+            }
+        }
+
+        // Check file size (async)
+        if let Some(max_size) = self.max_file_size {
+            if let Ok(metadata) = tokio::fs::metadata(file).await {
                 if metadata.len() > max_size {
                     return Ok(false);
                 }
