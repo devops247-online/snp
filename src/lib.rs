@@ -46,7 +46,7 @@ pub use file_lock::{
     ConfigFileLock, FileLock, FileLockManager, LockBehavior, LockConfig, LockHierarchy, LockInfo,
     LockMetrics, LockOrdering, LockStatus, LockType, StaleLockDetector, TempFileLock,
 };
-pub use filesystem::{FileFilter, FileSystem};
+pub use filesystem::{AsyncConfig, FileFilter, FileSystem};
 pub use git::GitRepository;
 pub use hook_chaining::{
     ChainExecutionResult, ChainedHook, ConditionContext, ConditionEvaluator,

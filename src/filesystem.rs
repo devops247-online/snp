@@ -7,6 +7,11 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+
+use futures::stream::{self, StreamExt};
+use tokio::sync::Semaphore;
 
 use crate::error::{ConfigError, Result, SnpError};
 
@@ -195,6 +200,106 @@ impl FileSystem {
 
         Ok(backup_path)
     }
+
+    /// Async version of detect_file_type
+    pub async fn detect_file_type_async(path: &Path) -> Result<Vec<String>> {
+        let mut types = Vec::new();
+
+        // Add "file" type to all files (matches identify library behavior)
+        types.push("file".to_string());
+
+        // Extension-based detection (synchronous, no I/O needed)
+        if let Some(extension) = path.extension() {
+            if let Some(ext_str) = extension.to_str() {
+                match ext_str.to_lowercase().as_str() {
+                    "py" | "pyi" => {
+                        types.push("python".to_string());
+                        if ext_str == "pyi" {
+                            types.push("pyi".to_string());
+                        }
+                    }
+                    "rs" => types.push("rust".to_string()),
+                    "js" => types.push("javascript".to_string()),
+                    "ts" => types.push("typescript".to_string()),
+                    "tsx" => {
+                        types.push("typescript".to_string());
+                        types.push("tsx".to_string());
+                    }
+                    "jsx" => {
+                        types.push("javascript".to_string());
+                        types.push("jsx".to_string());
+                    }
+                    "json" => types.push("json".to_string()),
+                    "yaml" | "yml" => types.push("yaml".to_string()),
+                    "toml" => types.push("toml".to_string()),
+                    "md" => types.push("markdown".to_string()),
+                    "txt" => types.push("text".to_string()),
+                    "sh" => types.push("shell".to_string()),
+                    "bash" => types.push("bash".to_string()),
+                    "zsh" => types.push("zsh".to_string()),
+                    "fish" => types.push("fish".to_string()),
+                    "dockerfile" => types.push("dockerfile".to_string()),
+                    _ => {}
+                }
+            }
+        }
+
+        // Check if it's a binary file (async I/O)
+        if Self::is_binary_file_async(path).await? {
+            types.push("binary".to_string());
+        } else {
+            types.push("text".to_string());
+        }
+
+        // Special case for Dockerfile without extension
+        if let Some(filename) = path.file_name() {
+            if let Some(name_str) = filename.to_str() {
+                if name_str.to_lowercase() == "dockerfile" {
+                    types.push("dockerfile".to_string());
+                }
+            }
+        }
+
+        Ok(types)
+    }
+
+    /// Async version of is_binary_file
+    pub async fn is_binary_file_async(path: &Path) -> Result<bool> {
+        if !tokio::fs::try_exists(path).await.map_err(|e| {
+            SnpError::Config(Box::new(ConfigError::IOError {
+                message: format!("Failed to check if file exists: {e}"),
+                path: Some(path.to_path_buf()),
+            }))
+        })? {
+            return Err(SnpError::Config(Box::new(ConfigError::NotFound {
+                path: path.to_path_buf(),
+                suggestion: Some("File does not exist".to_string()),
+            })));
+        }
+
+        let mut file = tokio::fs::File::open(path).await.map_err(|e| {
+            SnpError::Config(Box::new(ConfigError::IOError {
+                message: format!("Failed to open file: {e}"),
+                path: Some(path.to_path_buf()),
+            }))
+        })?;
+
+        // Read first 8192 bytes to check for binary content
+        let mut buffer = vec![0u8; 8192];
+        let bytes_read = tokio::io::AsyncReadExt::read(&mut file, &mut buffer)
+            .await
+            .map_err(|e| {
+                SnpError::Config(Box::new(ConfigError::IOError {
+                    message: format!("Failed to read file: {e}"),
+                    path: Some(path.to_path_buf()),
+                }))
+            })?;
+
+        // Check for null bytes (common indicator of binary files)
+        let is_binary = buffer[..bytes_read].contains(&0);
+
+        Ok(is_binary)
+    }
 }
 
 /// File filter for pattern matching and type-based filtering
@@ -203,6 +308,17 @@ pub struct FileFilter {
     exclude_patterns: Vec<Regex>,
     file_types: HashSet<String>,
     exclude_types: HashSet<String>,
+}
+
+impl Clone for FileFilter {
+    fn clone(&self) -> Self {
+        Self {
+            include_patterns: self.include_patterns.clone(),
+            exclude_patterns: self.exclude_patterns.clone(),
+            file_types: self.file_types.clone(),
+            exclude_types: self.exclude_types.clone(),
+        }
+    }
 }
 
 impl FileFilter {
@@ -341,11 +457,169 @@ impl FileFilter {
 
         Ok(arena_filtered.into_bump_slice())
     }
+
+    /// Async version of matches for individual file checking
+    pub async fn matches_async(&self, path: &Path) -> Result<bool> {
+        let normalized_path = FileSystem::normalize_path(path);
+        let path_str = normalized_path.to_string_lossy();
+
+        // Check exclude patterns first (early exit if excluded)
+        for exclude_pattern in &self.exclude_patterns {
+            if exclude_pattern.is_match(&path_str) {
+                return Ok(false);
+            }
+        }
+
+        // Check include patterns (if any are specified, at least one must match)
+        if !self.include_patterns.is_empty() {
+            let mut matches_include = false;
+            for include_pattern in &self.include_patterns {
+                if include_pattern.is_match(&path_str) {
+                    matches_include = true;
+                    break;
+                }
+            }
+            if !matches_include {
+                return Ok(false);
+            }
+        }
+
+        // Check file type filtering
+        if !self.file_types.is_empty() || !self.exclude_types.is_empty() {
+            let detected_types = FileSystem::detect_file_type_async(path).await?;
+            let type_set: HashSet<String> = detected_types.into_iter().collect();
+
+            // Check exclude types first
+            if !self.exclude_types.is_empty() && !self.exclude_types.is_disjoint(&type_set) {
+                return Ok(false);
+            }
+
+            // Check include types (if specified, file must have at least one matching type)
+            if !self.file_types.is_empty() && self.file_types.is_disjoint(&type_set) {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+
+    /// Async version of filter_files with configurable concurrency and batching
+    pub async fn filter_files_async(
+        &self,
+        files: &[PathBuf],
+        config: Option<AsyncConfig>,
+    ) -> Result<Vec<PathBuf>> {
+        let config = config.unwrap_or_default();
+        let semaphore = Arc::new(Semaphore::new(config.max_concurrent_files));
+
+        let filter = self.clone();
+
+        let results = stream::iter(files)
+            .map(|file| {
+                let sem = Arc::clone(&semaphore);
+                let filter = filter.clone();
+                let file = file.clone();
+
+                async move {
+                    let _permit = sem.acquire().await.map_err(|e| {
+                        SnpError::Config(Box::new(ConfigError::IOError {
+                            message: format!("Failed to acquire semaphore permit: {e}"),
+                            path: Some(file.clone()),
+                        }))
+                    })?;
+
+                    // Add timeout wrapper for I/O operations
+                    let timeout_duration = config.io_timeout;
+                    let result =
+                        tokio::time::timeout(timeout_duration, filter.matches_async(&file)).await;
+
+                    match result {
+                        Ok(Ok(matches)) => {
+                            if matches {
+                                Ok(Some(file))
+                            } else {
+                                Ok(None)
+                            }
+                        }
+                        Ok(Err(e)) => Err(e),
+                        Err(_) => Err(SnpError::Config(Box::new(ConfigError::IOError {
+                            message: format!("File operation timed out after {timeout_duration:?}"),
+                            path: Some(file),
+                        }))),
+                    }
+                }
+            })
+            .buffer_unordered(config.max_concurrent_files)
+            .collect::<Vec<_>>()
+            .await;
+
+        // Collect successful results and handle errors
+        let mut filtered_files = Vec::new();
+        for result in results {
+            match result {
+                Ok(Some(file)) => filtered_files.push(file),
+                Ok(None) => {} // File didn't match filter
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(filtered_files)
+    }
 }
 
 impl Default for FileFilter {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Configuration for async file operations
+#[derive(Debug, Clone)]
+pub struct AsyncConfig {
+    /// Maximum number of concurrent file operations (default: 64)
+    pub max_concurrent_files: usize,
+    /// Batch size for processing files (default: 100)
+    pub batch_size: usize,
+    /// I/O timeout for individual file operations (default: 30s)
+    pub io_timeout: Duration,
+    /// Number of retry attempts for transient I/O failures (default: 3)
+    pub retry_attempts: usize,
+}
+
+impl Default for AsyncConfig {
+    fn default() -> Self {
+        Self {
+            max_concurrent_files: 64,
+            batch_size: 100,
+            io_timeout: Duration::from_secs(30),
+            retry_attempts: 3,
+        }
+    }
+}
+
+impl AsyncConfig {
+    /// Create a new AsyncConfig with custom concurrency limit
+    pub fn with_concurrency(mut self, max_concurrent: usize) -> Self {
+        self.max_concurrent_files = max_concurrent;
+        self
+    }
+
+    /// Create a new AsyncConfig with custom batch size
+    pub fn with_batch_size(mut self, batch_size: usize) -> Self {
+        self.batch_size = batch_size;
+        self
+    }
+
+    /// Create a new AsyncConfig with custom timeout
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.io_timeout = timeout;
+        self
+    }
+
+    /// Create a new AsyncConfig with custom retry attempts
+    pub fn with_retry_attempts(mut self, attempts: usize) -> Self {
+        self.retry_attempts = attempts;
+        self
     }
 }
 
@@ -872,5 +1146,210 @@ mod tests {
         assert!(filtered
             .iter()
             .any(|p| p.to_string_lossy().contains("docs/readme.md")));
+    }
+
+    // Async tests
+    #[tokio::test]
+    async fn test_async_config_default() {
+        let config = AsyncConfig::default();
+        assert_eq!(config.max_concurrent_files, 64);
+        assert_eq!(config.batch_size, 100);
+        assert_eq!(config.io_timeout, Duration::from_secs(30));
+        assert_eq!(config.retry_attempts, 3);
+    }
+
+    #[tokio::test]
+    async fn test_async_config_builder() {
+        let config = AsyncConfig::default()
+            .with_concurrency(32)
+            .with_batch_size(50)
+            .with_timeout(Duration::from_secs(10))
+            .with_retry_attempts(5);
+
+        assert_eq!(config.max_concurrent_files, 32);
+        assert_eq!(config.batch_size, 50);
+        assert_eq!(config.io_timeout, Duration::from_secs(10));
+        assert_eq!(config.retry_attempts, 5);
+    }
+
+    #[tokio::test]
+    async fn test_async_binary_detection() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let text_file = create_text_file(temp_dir.path(), "text.txt", "Hello world");
+        assert!(!FileSystem::is_binary_file_async(&text_file).await.unwrap());
+
+        let binary_file = create_binary_file(temp_dir.path(), "binary.bin");
+        assert!(FileSystem::is_binary_file_async(&binary_file)
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_async_file_type_detection() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let py_file = create_text_file(temp_dir.path(), "script.py", "print('hello')");
+        let types = FileSystem::detect_file_type_async(&py_file).await.unwrap();
+
+        assert!(types.contains(&"file".to_string()));
+        assert!(types.contains(&"python".to_string()));
+        assert!(types.contains(&"text".to_string()));
+        assert!(!types.contains(&"binary".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_async_file_filter_basic() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let files = vec![
+            create_text_file(temp_dir.path(), "main.py", "print('hello')"),
+            create_text_file(temp_dir.path(), "app.js", "console.log('hello')"),
+            create_text_file(temp_dir.path(), "readme.txt", "Hello"),
+        ];
+
+        let filter = FileFilter::new()
+            .with_include_patterns(vec![r"\.py$".to_string()])
+            .unwrap();
+
+        let filtered = filter.filter_files_async(&files, None).await.unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert!(filtered[0].file_name().unwrap() == "main.py");
+    }
+
+    #[tokio::test]
+    async fn test_async_file_filter_with_config() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let files = vec![
+            create_text_file(temp_dir.path(), "file1.py", "print('1')"),
+            create_text_file(temp_dir.path(), "file2.py", "print('2')"),
+            create_text_file(temp_dir.path(), "file3.py", "print('3')"),
+            create_text_file(temp_dir.path(), "file4.py", "print('4')"),
+        ];
+
+        let filter = FileFilter::new().with_file_types(vec!["python".to_string()]);
+
+        let config = AsyncConfig::default().with_concurrency(2);
+        let filtered = filter
+            .filter_files_async(&files, Some(config))
+            .await
+            .unwrap();
+
+        assert_eq!(filtered.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn test_async_file_filter_large_set() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let mut files = Vec::new();
+        for i in 0..100 {
+            let filename = format!("file_{i}.py");
+            files.push(create_text_file(
+                temp_dir.path(),
+                &filename,
+                "print('hello')",
+            ));
+        }
+
+        let filter = FileFilter::new().with_file_types(vec!["python".to_string()]);
+
+        let start = std::time::Instant::now();
+        let filtered = filter.filter_files_async(&files, None).await.unwrap();
+        let duration = start.elapsed();
+
+        assert_eq!(filtered.len(), 100);
+        assert!(duration.as_millis() < 1000);
+    }
+
+    #[tokio::test]
+    async fn test_async_file_filter_concurrent_performance() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let mut files = Vec::new();
+        for i in 0..1000 {
+            let filename = format!("file_{i}.py");
+            files.push(create_text_file(
+                temp_dir.path(),
+                &filename,
+                "print('hello')",
+            ));
+        }
+
+        let filter = FileFilter::new().with_file_types(vec!["python".to_string()]);
+
+        let config = AsyncConfig::default().with_concurrency(128);
+
+        let start = std::time::Instant::now();
+        let filtered = filter
+            .filter_files_async(&files, Some(config))
+            .await
+            .unwrap();
+        let async_duration = start.elapsed();
+
+        let start = std::time::Instant::now();
+        let sync_filtered = filter.filter_files(&files).unwrap();
+        let sync_duration = start.elapsed();
+
+        assert_eq!(filtered.len(), 1000);
+        assert_eq!(sync_filtered.len(), 1000);
+
+        println!("Async duration: {async_duration:?}, Sync duration: {sync_duration:?}");
+    }
+
+    #[tokio::test]
+    async fn test_async_matches_individual() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let py_file = create_text_file(temp_dir.path(), "script.py", "print('hello')");
+        let js_file = create_text_file(temp_dir.path(), "app.js", "console.log('hello')");
+
+        let filter = FileFilter::new()
+            .with_include_patterns(vec![r"\.py$".to_string()])
+            .unwrap();
+
+        assert!(filter.matches_async(&py_file).await.unwrap());
+        assert!(!filter.matches_async(&js_file).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_async_error_handling_nonexistent_file() {
+        let nonexistent = PathBuf::from("/nonexistent/file.txt");
+        let result = FileSystem::is_binary_file_async(&nonexistent).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_async_mixed_file_types() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let files = vec![
+            create_text_file(temp_dir.path(), "script.py", "print('hello')"),
+            create_text_file(temp_dir.path(), "app.js", "console.log('hello')"),
+            create_text_file(temp_dir.path(), "main.rs", "fn main() {}"),
+            create_binary_file(temp_dir.path(), "data.bin"),
+            create_text_file(temp_dir.path(), "readme.md", "# Title"),
+        ];
+
+        let filter = FileFilter::new()
+            .with_include_patterns(vec![r"\.(py|rs|md)$".to_string()])
+            .unwrap()
+            .with_exclude_types(vec!["binary".to_string()]);
+
+        let filtered = filter.filter_files_async(&files, None).await.unwrap();
+
+        assert_eq!(filtered.len(), 3);
+        assert!(filtered
+            .iter()
+            .any(|p| p.file_name().unwrap() == "script.py"));
+        assert!(filtered.iter().any(|p| p.file_name().unwrap() == "main.rs"));
+        assert!(filtered
+            .iter()
+            .any(|p| p.file_name().unwrap() == "readme.md"));
+        assert!(!filtered.iter().any(|p| p.file_name().unwrap() == "app.js"));
+        assert!(!filtered
+            .iter()
+            .any(|p| p.file_name().unwrap() == "data.bin"));
     }
 }
