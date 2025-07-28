@@ -308,13 +308,11 @@ impl LanguageRegistry {
         let cache_hits = self.cache_hits.load(Ordering::Relaxed);
         let cache_misses = self.cache_misses.load(Ordering::Relaxed);
         let total_cache_requests = cache_hits + cache_misses;
-
         let cache_hit_rate = if total_cache_requests > 0 {
             cache_hits as f64 / total_cache_requests as f64
         } else {
             0.0
         };
-
         RegistryStats {
             total_registrations: self.total_registrations.load(Ordering::Relaxed),
             active_plugins: self.active_plugins.load(Ordering::Relaxed),
@@ -324,17 +322,14 @@ impl LanguageRegistry {
             cache_hit_rate,
         }
     }
-
     /// Clear detection cache
     pub fn clear_cache(&self) {
         self.detection_cache.clear();
     }
-
     /// Get cache size
     pub fn cache_size(&self) -> usize {
         self.detection_cache.len()
     }
-
     /// Reset statistics counters
     pub fn reset_stats(&self) {
         self.cache_hits.store(0, Ordering::Relaxed);
