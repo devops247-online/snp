@@ -7,6 +7,10 @@ use std::path::PathBuf;
 use crate::error::{ConfigError, Result, SnpError};
 use crate::filesystem::FileFilter;
 
+// Arena allocation imports for performance optimization
+use bumpalo::collections::Vec as BumpVec;
+use bumpalo::Bump;
+
 /// Represents the different stages where hooks can be executed
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Stage {
@@ -410,6 +414,27 @@ impl Hook {
         cmd
     }
 
+    /// Get the full command to execute using arena allocation for better performance
+    /// This method avoids string clones by allocating command strings in the provided arena
+    pub fn command_arena<'arena>(&self, arena: &'arena Bump) -> &'arena [&'arena str] {
+        // Pre-allocate arena space for command parts
+        let capacity = 1 + self.args.len();
+        let mut arena_cmd = BumpVec::with_capacity_in(capacity, arena);
+
+        // Add entry (command executable) to arena
+        let entry_str: &str = arena.alloc_str(&self.entry);
+        arena_cmd.push(entry_str);
+
+        // Add arguments to arena
+        for arg in &self.args {
+            let arg_str: &str = arena.alloc_str(arg);
+            arena_cmd.push(arg_str);
+        }
+
+        // Convert to arena slice
+        arena_cmd.into_bump_slice()
+    }
+
     /// Create a Hook from configuration
     pub fn from_config(
         config_hook: &crate::config::Hook,
@@ -562,6 +587,161 @@ impl ExecutionContext {
         let filter = hook.file_filter()?;
         filter.filter_files(&self.files)
     }
+}
+
+/// Arena-based execution context for improved performance
+/// Uses arena allocation to reduce heap allocations and improve cache locality
+#[derive(Debug)]
+pub struct ArenaExecutionContext<'arena> {
+    /// Arena allocator for memory management
+    arena: &'arena Bump,
+    /// Files to process (arena-allocated slice)
+    pub files: &'arena [PathBuf],
+    /// Current stage being executed
+    pub stage: Stage,
+    /// Whether to show verbose output
+    pub verbose: bool,
+    /// Whether to show diff on failure
+    pub show_diff_on_failure: bool,
+    /// Environment variables (arena-allocated strings)
+    pub environment: HashMap<&'arena str, &'arena str>,
+    /// Working directory
+    pub working_directory: PathBuf,
+    /// Whether to use color output
+    pub color: bool,
+}
+
+impl<'arena> ArenaExecutionContext<'arena> {
+    /// Create a new arena-based execution context
+    pub fn new(
+        arena: &'arena Bump,
+        stage: Stage,
+        files: Vec<PathBuf>,
+        environment: HashMap<String, String>,
+    ) -> Self {
+        // Allocate files in the arena using BumpVec
+        let mut arena_files = BumpVec::with_capacity_in(files.len(), arena);
+        for file in files {
+            arena_files.push(file);
+        }
+        let files_slice = arena_files.into_bump_slice();
+
+        // Allocate environment strings in the arena
+        let mut arena_env = HashMap::with_capacity(environment.len());
+        for (key, value) in environment {
+            let arena_key: &str = arena.alloc_str(&key);
+            let arena_value: &str = arena.alloc_str(&value);
+            arena_env.insert(arena_key, arena_value);
+        }
+
+        Self {
+            arena,
+            files: files_slice,
+            stage,
+            verbose: false,
+            show_diff_on_failure: false,
+            environment: arena_env,
+            working_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            color: true,
+        }
+    }
+
+    /// Create a new arena-based execution context with default settings
+    pub fn with_defaults(arena: &'arena Bump, stage: Stage) -> Self {
+        Self {
+            arena,
+            files: &[],
+            stage,
+            verbose: false,
+            show_diff_on_failure: false,
+            environment: HashMap::new(),
+            working_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            color: true,
+        }
+    }
+
+    /// Builder pattern methods
+    pub fn with_verbose(mut self, verbose: bool) -> Self {
+        self.verbose = verbose;
+        self
+    }
+
+    pub fn with_show_diff(mut self, show_diff: bool) -> Self {
+        self.show_diff_on_failure = show_diff;
+        self
+    }
+
+    pub fn with_working_directory(mut self, dir: PathBuf) -> Self {
+        self.working_directory = dir;
+        self
+    }
+
+    pub fn with_color(mut self, color: bool) -> Self {
+        self.color = color;
+        self
+    }
+
+    /// Add an environment variable using arena allocation
+    pub fn add_env(&mut self, key: &str, value: &str) {
+        let arena_key = self.arena.alloc_str(key);
+        let arena_value = self.arena.alloc_str(value);
+        self.environment.insert(arena_key, arena_value);
+    }
+
+    /// Get filtered files for a specific hook
+    /// Returns an arena-allocated slice of filtered files
+    pub fn filtered_files(&self, hook: &Hook) -> Result<&'arena [PathBuf]> {
+        if hook.always_run {
+            return Ok(self.files);
+        }
+
+        let filter = hook.file_filter()?;
+        let filtered = filter.filter_files(self.files)?;
+
+        // Allocate filtered results in arena using BumpVec
+        let mut arena_filtered = BumpVec::with_capacity_in(filtered.len(), self.arena);
+        for file in filtered {
+            arena_filtered.push(file);
+        }
+
+        Ok(arena_filtered.into_bump_slice())
+    }
+
+    /// Convert arena context to regular context for compatibility
+    pub fn to_regular_context(&self) -> ExecutionContext {
+        ExecutionContext {
+            files: self.files.to_vec(),
+            stage: self.stage.clone(),
+            verbose: self.verbose,
+            show_diff_on_failure: self.show_diff_on_failure,
+            environment: self
+                .environment
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            working_directory: self.working_directory.clone(),
+            color: self.color,
+        }
+    }
+
+    /// Get memory usage statistics for monitoring
+    pub fn memory_stats(&self) -> ArenaMemoryStats {
+        ArenaMemoryStats {
+            allocated_bytes: self.arena.allocated_bytes(),
+            chunk_capacity: self.arena.chunk_capacity(),
+            files_count: self.files.len(),
+            environment_count: self.environment.len(),
+        }
+    }
+}
+
+/// Memory statistics for arena-based execution context
+#[derive(Debug, Clone)]
+pub struct ArenaMemoryStats {
+    pub allocated_bytes: usize,
+    pub chunk_capacity: usize,
+    pub files_count: usize,
+    pub environment_count: usize,
 }
 
 #[cfg(test)]

@@ -90,6 +90,7 @@ regex-automata = "0.4"
 # Performance optimization
 lru = "0.16"
 parking_lot = "0.12"
+bumpalo = { version = "3.14", features = ["collections"] }
 
 # Language trait architecture dependencies
 libloading = "0.8"     # Dynamic library loading
@@ -193,6 +194,10 @@ harness = false
 
 [[bench]]
 name = "logging_benchmark"
+harness = false
+
+[[bench]]
+name = "arena_benchmark"
 harness = false
 
 # Cargo-release configuration
