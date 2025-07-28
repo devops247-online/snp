@@ -76,13 +76,13 @@ pub use install::{
     UninstallResult,
 };
 pub use language::{
+    registry::{RegistryConfig, RegistryStats},
     BaseLanguagePlugin, CommandBuilder, Dependency, DependencyConflict, DependencyManager,
     DependencyManagerConfig, DependencySource, EnvironmentConfig, EnvironmentInfo,
     EnvironmentManager, EnvironmentMetadata, ExecutionCache, InstallationResult, InstalledPackage,
     IsolationLevel, Language, LanguageEnvironment, LanguageError, LanguageHookExecutor,
     LanguageRegistry, PluginMetadata, ResolvedDependency, UpdateResult, ValidationIssue,
     ValidationReport, VersionSpec,
-    registry::{RegistryConfig, RegistryStats},
 };
 pub use lock_free_cache::{CacheStats, LockFreeCache};
 pub use lock_free_scheduler::{

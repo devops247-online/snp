@@ -429,9 +429,12 @@ impl ConcurrencyExecutor {
             lock_free_scheduler: None,
         }
     }
-    
+
     /// Create a new executor with lock-free scheduling enabled
-    pub fn with_lock_free_scheduler(max_concurrent: usize, resource_limits: ResourceLimits) -> Self {
+    pub fn with_lock_free_scheduler(
+        max_concurrent: usize,
+        resource_limits: ResourceLimits,
+    ) -> Self {
         let scheduler = Arc::new(LockFreeTaskScheduler::new(max_concurrent, 1024));
         Self {
             max_concurrent,
@@ -446,15 +449,17 @@ impl ConcurrencyExecutor {
             lock_free_scheduler: Some(scheduler),
         }
     }
-    
+
     /// Check if lock-free scheduling is enabled
     pub fn is_lock_free_enabled(&self) -> bool {
         self.lock_free_scheduler.is_some()
     }
-    
+
     /// Get scheduler statistics if lock-free scheduling is enabled
     pub fn get_scheduler_stats(&self) -> Option<SchedulerStats> {
-        self.lock_free_scheduler.as_ref().map(|scheduler| scheduler.get_stats())
+        self.lock_free_scheduler
+            .as_ref()
+            .map(|scheduler| scheduler.get_stats())
     }
 
     // Task execution methods

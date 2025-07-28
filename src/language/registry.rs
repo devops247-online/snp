@@ -46,14 +46,14 @@ pub struct LanguageRegistry {
     plugins: DashMap<String, Arc<dyn Language>>,
     plugin_configs: DashMap<String, LanguageConfig>,
     detection_cache: DashMap<PathBuf, Option<String>>,
-    
+
     // Atomic counters for statistics tracking
     total_registrations: AtomicU64,
     active_plugins: AtomicUsize,
     cache_hits: AtomicU64,
     cache_misses: AtomicU64,
     detection_requests: AtomicU64,
-    
+
     // Atomic configuration updates
     config: ArcSwap<RegistryConfig>,
 }
@@ -72,7 +72,7 @@ impl LanguageRegistry {
             config: ArcSwap::from_pointee(RegistryConfig::default()),
         }
     }
-    
+
     /// Create a new registry with custom configuration
     pub fn with_config(config: RegistryConfig) -> Self {
         Self {
@@ -87,12 +87,12 @@ impl LanguageRegistry {
             config: ArcSwap::from_pointee(config),
         }
     }
-    
+
     /// Update registry configuration atomically
     pub fn update_config(&self, new_config: RegistryConfig) {
         self.config.store(Arc::new(new_config));
     }
-    
+
     /// Get current configuration
     pub fn get_config(&self) -> Arc<RegistryConfig> {
         self.config.load().clone()
@@ -106,9 +106,12 @@ impl LanguageRegistry {
         language.validate_config(&language.default_config())?;
 
         // Lock-free insertion with atomic statistics tracking
-        let was_new = self.plugins.insert(name.clone(), language.clone()).is_none();
+        let was_new = self
+            .plugins
+            .insert(name.clone(), language.clone())
+            .is_none();
         self.plugin_configs.insert(name, language.default_config());
-        
+
         if was_new {
             self.total_registrations.fetch_add(1, Ordering::Relaxed);
             self.active_plugins.fetch_add(1, Ordering::Relaxed);
@@ -127,7 +130,7 @@ impl LanguageRegistry {
         }
 
         self.plugin_configs.remove(language_name);
-        
+
         // Update atomic counters
         self.active_plugins.fetch_sub(1, Ordering::Relaxed);
 
@@ -155,13 +158,13 @@ impl LanguageRegistry {
     pub fn detect_language(&self, file_path: &Path) -> Result<Option<String>> {
         // Increment detection request counter
         self.detection_requests.fetch_add(1, Ordering::Relaxed);
-        
+
         // Check if caching is enabled
         let config = self.config.load();
         if !config.enable_detection_cache {
             return self.detect_language_uncached(file_path);
         }
-        
+
         // Check cache first
         if let Some(cached) = self.detection_cache.get(file_path) {
             self.cache_hits.fetch_add(1, Ordering::Relaxed);
@@ -297,21 +300,19 @@ impl LanguageRegistry {
         // This would be where we'd scan for .so/.dll files and load them
         Ok(0)
     }
-    
+
     // Statistics and monitoring methods
-    
+
     /// Get current registry statistics atomically
     pub fn get_stats(&self) -> RegistryStats {
         let cache_hits = self.cache_hits.load(Ordering::Relaxed);
         let cache_misses = self.cache_misses.load(Ordering::Relaxed);
         let total_cache_requests = cache_hits + cache_misses;
-        
         let cache_hit_rate = if total_cache_requests > 0 {
             cache_hits as f64 / total_cache_requests as f64
         } else {
             0.0
         };
-        
         RegistryStats {
             total_registrations: self.total_registrations.load(Ordering::Relaxed),
             active_plugins: self.active_plugins.load(Ordering::Relaxed),
@@ -321,17 +322,14 @@ impl LanguageRegistry {
             cache_hit_rate,
         }
     }
-    
     /// Clear detection cache
     pub fn clear_cache(&self) {
         self.detection_cache.clear();
     }
-    
     /// Get cache size
     pub fn cache_size(&self) -> usize {
         self.detection_cache.len()
     }
-    
     /// Reset statistics counters
     pub fn reset_stats(&self) {
         self.cache_hits.store(0, Ordering::Relaxed);
