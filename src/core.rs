@@ -1,6 +1,7 @@
 // Core data structures for SNP
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -408,9 +409,20 @@ impl Hook {
     }
 
     /// Get the full command to execute
+    /// For optimal performance, consider using command_cow() for zero-copy operations
     pub fn command(&self) -> Vec<String> {
-        let mut cmd = vec![self.entry.clone()];
-        cmd.extend(self.args.clone());
+        self.command_cow()
+            .into_iter()
+            .map(|cow| cow.into_owned())
+            .collect()
+    }
+
+    /// Get the full command to execute using zero-copy operations with Cow<str>
+    /// This method eliminates unnecessary string clones by borrowing string slices when possible
+    pub fn command_cow(&self) -> Vec<Cow<'_, str>> {
+        let mut cmd = Vec::with_capacity(1 + self.args.len());
+        cmd.push(Cow::Borrowed(self.entry.as_str()));
+        cmd.extend(self.args.iter().map(|s| Cow::Borrowed(s.as_str())));
         cmd
     }
 
@@ -888,6 +900,72 @@ mod tests {
 
         let cmd = hook.command();
         assert_eq!(cmd, vec!["black", "--check", "--diff"]);
+    }
+
+    #[test]
+    fn test_hook_command_cow() {
+        let hook = Hook::new("black", "black", "python")
+            .with_args(vec!["--check".to_string(), "--diff".to_string()]);
+
+        let cmd_cow = hook.command_cow();
+        let cmd_strings: Vec<String> = cmd_cow.iter().map(|cow| cow.to_string()).collect();
+
+        assert_eq!(cmd_strings, vec!["black", "--check", "--diff"]);
+        assert_eq!(cmd_cow.len(), 3);
+
+        // Verify zero-copy behavior - all should be borrowed
+        assert!(matches!(cmd_cow[0], Cow::Borrowed(_)));
+        assert!(matches!(cmd_cow[1], Cow::Borrowed(_)));
+        assert!(matches!(cmd_cow[2], Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_hook_command_cow_empty_args() {
+        let hook = Hook::new("echo", "echo", "system");
+
+        let cmd_cow = hook.command_cow();
+        assert_eq!(cmd_cow.len(), 1);
+        assert_eq!(cmd_cow[0], "echo");
+        assert!(matches!(cmd_cow[0], Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_hook_command_vs_command_cow_equivalence() {
+        let hook = Hook::new("rustfmt", "rustfmt", "rust").with_args(vec![
+            "--check".to_string(),
+            "--edition".to_string(),
+            "2021".to_string(),
+        ]);
+
+        let cmd_string = hook.command();
+        let cmd_cow = hook.command_cow();
+        let cmd_cow_owned: Vec<String> = cmd_cow.into_iter().map(|c| c.into_owned()).collect();
+
+        assert_eq!(cmd_string, cmd_cow_owned);
+    }
+
+    #[test]
+    fn test_hook_command_cow_memory_efficiency() {
+        let hook = Hook::new("test", "test-command", "system").with_args(vec![
+            "arg1".to_string(),
+            "arg2".to_string(),
+            "arg3".to_string(),
+        ]);
+
+        let cmd_cow = hook.command_cow();
+
+        // All elements should be borrowed (zero-copy)
+        for cow_str in &cmd_cow {
+            assert!(
+                matches!(cow_str, Cow::Borrowed(_)),
+                "Expected borrowed string, got owned: {cow_str:?}",
+            );
+        }
+
+        // Verify content correctness
+        let expected = vec!["test-command", "arg1", "arg2", "arg3"];
+        let actual: Vec<&str> = cmd_cow.iter().map(|c| c.as_ref()).collect();
+        assert_eq!(actual, expected);
     }
 
     #[test]

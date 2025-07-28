@@ -203,11 +203,86 @@ fn bench_memory_usage(c: &mut Criterion) {
     group.finish();
 }
 
+// Benchmark zero-copy hook command generation
+fn bench_zero_copy_commands(c: &mut Criterion) {
+    let mut group = c.benchmark_group("hook_command_generation_zero_copy");
+
+    // Create hooks with varying number of arguments to test scalability
+    let hooks: Vec<Hook> = vec![
+        Hook::new("simple", "rustc", "rust"),
+        Hook::new("few_args", "cargo", "rust")
+            .with_args(vec!["build".to_string(), "--release".to_string()]),
+        Hook::new("many_args", "rustfmt", "rust")
+            .with_args(vec![
+                "--check".to_string(),
+                "--edition".to_string(),
+                "2021".to_string(),
+                "--config".to_string(),
+                "hard_tabs=true".to_string(),
+                "--emit".to_string(),
+                "files".to_string(),
+                "--color".to_string(),
+                "always".to_string(),
+            ]),
+    ];
+
+    for hook in &hooks {
+        group.bench_with_input(
+            BenchmarkId::new("command_traditional", &hook.id),
+            hook,
+            |b, hook| {
+                b.iter(|| {
+                    let _command = black_box(hook.command());
+                })
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("command_cow", &hook.id),
+            hook,
+            |b, hook| {
+                b.iter(|| {
+                    let _command = black_box(hook.command_cow());
+                })
+            },
+        );
+    }
+
+    // Benchmark frequent command generation (hot path simulation)
+    let hook = Hook::new("hot_path", "black", "python")
+        .with_args(vec![
+            "--check".to_string(),
+            "--diff".to_string(),
+            "--color".to_string(),
+            "--line-length".to_string(),
+            "88".to_string(),
+        ]);
+
+    group.bench_function("hot_path_traditional", |b| {
+        b.iter(|| {
+            for _ in 0..100 {
+                let _command = black_box(hook.command());
+            }
+        })
+    });
+
+    group.bench_function("hot_path_cow", |b| {
+        b.iter(|| {
+            for _ in 0..100 {
+                let _command = black_box(hook.command_cow());
+            }
+        })
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_execution_context_creation,
     bench_hook_command_generation,
     bench_memory_allocation_patterns,
-    bench_memory_usage
+    bench_memory_usage,
+    bench_zero_copy_commands
 );
 criterion_main!(benches);
