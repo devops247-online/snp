@@ -164,7 +164,7 @@ winapi = { version = "0.3", features = ["processthreadsapi", "winbase", "handlea
 assert_cmd = "2.0"
 predicates = "3.0"
 tempfile = "3.8"
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.7", features = ["html_reports"] }
 serial_test = "3.0"
 # Release management
 cargo-release = "0.25"
