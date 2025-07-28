@@ -1,5 +1,6 @@
 use clap::Parser;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
 use snp::cli::Cli;
 
 fn benchmark_cli_parsing(c: &mut Criterion) {

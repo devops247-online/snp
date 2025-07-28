@@ -2,7 +2,8 @@
 // Measures the performance improvement from arena-based memory management
 
 use bumpalo::Bump;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use std::hint::black_box;
 use snp::core::{ArenaExecutionContext, ExecutionContext, Hook, Stage};
 use std::collections::HashMap;
 use std::path::PathBuf;
