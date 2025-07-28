@@ -1,19 +1,61 @@
 // Plugin registration and discovery system
 
+use arc_swap::ArcSwap;
 use dashmap::DashMap;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::error::Result;
 
 use super::traits::{Language, LanguageConfig, LanguageError};
 
-/// Language plugin registry
+/// Registry configuration for atomic updates
+#[derive(Debug, Clone)]
+pub struct RegistryConfig {
+    pub max_cache_size: usize,
+    pub enable_detection_cache: bool,
+    pub cache_ttl_seconds: u64,
+}
+
+impl Default for RegistryConfig {
+    fn default() -> Self {
+        Self {
+            max_cache_size: 1000,
+            enable_detection_cache: true,
+            cache_ttl_seconds: 3600, // 1 hour
+        }
+    }
+}
+
+/// Registry statistics exposed atomically
+#[derive(Debug, Clone)]
+pub struct RegistryStats {
+    pub total_registrations: u64,
+    pub active_plugins: usize,
+    pub cache_hits: u64,
+    pub cache_misses: u64,
+    pub detection_requests: u64,
+    pub cache_hit_rate: f64,
+}
+
+/// Language plugin registry with lock-free operations and atomic statistics
 pub struct LanguageRegistry {
+    // Lock-free concurrent data structures
     plugins: DashMap<String, Arc<dyn Language>>,
     plugin_configs: DashMap<String, LanguageConfig>,
     detection_cache: DashMap<PathBuf, Option<String>>,
+    
+    // Atomic counters for statistics tracking
+    total_registrations: AtomicU64,
+    active_plugins: AtomicUsize,
+    cache_hits: AtomicU64,
+    cache_misses: AtomicU64,
+    detection_requests: AtomicU64,
+    
+    // Atomic configuration updates
+    config: ArcSwap<RegistryConfig>,
 }
 
 impl LanguageRegistry {
@@ -22,7 +64,38 @@ impl LanguageRegistry {
             plugins: DashMap::new(),
             plugin_configs: DashMap::new(),
             detection_cache: DashMap::new(),
+            total_registrations: AtomicU64::new(0),
+            active_plugins: AtomicUsize::new(0),
+            cache_hits: AtomicU64::new(0),
+            cache_misses: AtomicU64::new(0),
+            detection_requests: AtomicU64::new(0),
+            config: ArcSwap::from_pointee(RegistryConfig::default()),
         }
+    }
+    
+    /// Create a new registry with custom configuration
+    pub fn with_config(config: RegistryConfig) -> Self {
+        Self {
+            plugins: DashMap::new(),
+            plugin_configs: DashMap::new(),
+            detection_cache: DashMap::new(),
+            total_registrations: AtomicU64::new(0),
+            active_plugins: AtomicUsize::new(0),
+            cache_hits: AtomicU64::new(0),
+            cache_misses: AtomicU64::new(0),
+            detection_requests: AtomicU64::new(0),
+            config: ArcSwap::from_pointee(config),
+        }
+    }
+    
+    /// Update registry configuration atomically
+    pub fn update_config(&self, new_config: RegistryConfig) {
+        self.config.store(Arc::new(new_config));
+    }
+    
+    /// Get current configuration
+    pub fn get_config(&self) -> Arc<RegistryConfig> {
+        self.config.load().clone()
     }
 
     // Plugin management
@@ -32,8 +105,14 @@ impl LanguageRegistry {
         // Validate plugin before registering
         language.validate_config(&language.default_config())?;
 
-        self.plugins.insert(name.clone(), language.clone());
+        // Lock-free insertion with atomic statistics tracking
+        let was_new = self.plugins.insert(name.clone(), language.clone()).is_none();
         self.plugin_configs.insert(name, language.default_config());
+        
+        if was_new {
+            self.total_registrations.fetch_add(1, Ordering::Relaxed);
+            self.active_plugins.fetch_add(1, Ordering::Relaxed);
+        }
 
         Ok(())
     }
@@ -48,6 +127,9 @@ impl LanguageRegistry {
         }
 
         self.plugin_configs.remove(language_name);
+        
+        // Update atomic counters
+        self.active_plugins.fetch_sub(1, Ordering::Relaxed);
 
         // Clear detection cache entries for this plugin
         self.detection_cache
@@ -71,16 +153,30 @@ impl LanguageRegistry {
 
     // Language detection
     pub fn detect_language(&self, file_path: &Path) -> Result<Option<String>> {
+        // Increment detection request counter
+        self.detection_requests.fetch_add(1, Ordering::Relaxed);
+        
+        // Check if caching is enabled
+        let config = self.config.load();
+        if !config.enable_detection_cache {
+            return self.detect_language_uncached(file_path);
+        }
+        
         // Check cache first
         if let Some(cached) = self.detection_cache.get(file_path) {
+            self.cache_hits.fetch_add(1, Ordering::Relaxed);
             return Ok(cached.clone());
         }
 
+        // Cache miss - perform detection
+        self.cache_misses.fetch_add(1, Ordering::Relaxed);
         let detected = self.detect_language_uncached(file_path)?;
 
-        // Cache the result
-        self.detection_cache
-            .insert(file_path.to_path_buf(), detected.clone());
+        // Cache the result if cache size is within limits
+        if self.detection_cache.len() < config.max_cache_size.max(1000) {
+            self.detection_cache
+                .insert(file_path.to_path_buf(), detected.clone());
+        }
 
         Ok(detected)
     }
@@ -200,6 +296,47 @@ impl LanguageRegistry {
         // For now, just return 0 as we don't have dynamic loading implemented
         // This would be where we'd scan for .so/.dll files and load them
         Ok(0)
+    }
+    
+    // Statistics and monitoring methods
+    
+    /// Get current registry statistics atomically
+    pub fn get_stats(&self) -> RegistryStats {
+        let cache_hits = self.cache_hits.load(Ordering::Relaxed);
+        let cache_misses = self.cache_misses.load(Ordering::Relaxed);
+        let total_cache_requests = cache_hits + cache_misses;
+        
+        let cache_hit_rate = if total_cache_requests > 0 {
+            cache_hits as f64 / total_cache_requests as f64
+        } else {
+            0.0
+        };
+        
+        RegistryStats {
+            total_registrations: self.total_registrations.load(Ordering::Relaxed),
+            active_plugins: self.active_plugins.load(Ordering::Relaxed),
+            cache_hits,
+            cache_misses,
+            detection_requests: self.detection_requests.load(Ordering::Relaxed),
+            cache_hit_rate,
+        }
+    }
+    
+    /// Clear detection cache
+    pub fn clear_cache(&self) {
+        self.detection_cache.clear();
+    }
+    
+    /// Get cache size
+    pub fn cache_size(&self) -> usize {
+        self.detection_cache.len()
+    }
+    
+    /// Reset statistics counters
+    pub fn reset_stats(&self) {
+        self.cache_hits.store(0, Ordering::Relaxed);
+        self.cache_misses.store(0, Ordering::Relaxed);
+        self.detection_requests.store(0, Ordering::Relaxed);
     }
 }
 

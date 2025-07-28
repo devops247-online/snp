@@ -7,6 +7,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::{RwLock, Semaphore};
 
+use crate::lock_free_scheduler::{LockFreeTaskScheduler, SchedulerStats};
+
 use crate::error::{Result, SnpError};
 use crate::process::ProcessManager;
 
@@ -408,6 +410,8 @@ pub struct ConcurrencyExecutor {
     #[allow(dead_code)]
     process_manager: Arc<ProcessManager>,
     scheduling_strategy: SchedulingStrategy,
+    // Optional lock-free scheduler for improved performance
+    lock_free_scheduler: Option<Arc<LockFreeTaskScheduler>>,
 }
 
 impl ConcurrencyExecutor {
@@ -422,7 +426,35 @@ impl ConcurrencyExecutor {
                 Duration::from_secs(300),
             )),
             scheduling_strategy: SchedulingStrategy::Priority,
+            lock_free_scheduler: None,
         }
+    }
+    
+    /// Create a new executor with lock-free scheduling enabled
+    pub fn with_lock_free_scheduler(max_concurrent: usize, resource_limits: ResourceLimits) -> Self {
+        let scheduler = Arc::new(LockFreeTaskScheduler::new(max_concurrent, 1024));
+        Self {
+            max_concurrent,
+            semaphore: Arc::new(Semaphore::new(max_concurrent)),
+            resource_limits,
+            task_registry: Arc::new(RwLock::new(HashMap::new())),
+            process_manager: Arc::new(ProcessManager::with_config(
+                max_concurrent,
+                Duration::from_secs(300),
+            )),
+            scheduling_strategy: SchedulingStrategy::Priority,
+            lock_free_scheduler: Some(scheduler),
+        }
+    }
+    
+    /// Check if lock-free scheduling is enabled
+    pub fn is_lock_free_enabled(&self) -> bool {
+        self.lock_free_scheduler.is_some()
+    }
+    
+    /// Get scheduler statistics if lock-free scheduling is enabled
+    pub fn get_scheduler_stats(&self) -> Option<SchedulerStats> {
+        self.lock_free_scheduler.as_ref().map(|scheduler| scheduler.get_stats())
     }
 
     // Task execution methods

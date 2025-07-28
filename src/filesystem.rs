@@ -342,8 +342,18 @@ impl FileFilter {
 
     /// Add include patterns (files that match these patterns will be included)
     pub fn with_include_patterns(mut self, patterns: Vec<String>) -> Result<Self> {
-        // Skip validation here - it will happen lazily during matches
-        // This avoids async/sync conflicts
+        // Validate patterns synchronously using standard regex crate
+        for pattern in &patterns {
+            regex::Regex::new(pattern).map_err(|e| {
+                crate::error::SnpError::Config(Box::new(crate::error::ConfigError::InvalidRegex {
+                    pattern: pattern.clone(),
+                    field: "include_patterns".to_string(),
+                    error: e.to_string(),
+                    file_path: None,
+                    line: None,
+                }))
+            })?;
+        }
         self.include_pattern_strings.extend(patterns);
         Ok(self)
     }
@@ -362,8 +372,18 @@ impl FileFilter {
 
     /// Add exclude patterns (files that match these patterns will be excluded)
     pub fn with_exclude_patterns(mut self, patterns: Vec<String>) -> Result<Self> {
-        // Skip validation here - it will happen lazily during matches
-        // This avoids async/sync conflicts
+        // Validate patterns synchronously using standard regex crate
+        for pattern in &patterns {
+            regex::Regex::new(pattern).map_err(|e| {
+                crate::error::SnpError::Config(Box::new(crate::error::ConfigError::InvalidRegex {
+                    pattern: pattern.clone(),
+                    field: "exclude_patterns".to_string(),
+                    error: e.to_string(),
+                    file_path: None,
+                    line: None,
+                }))
+            })?;
+        }
         self.exclude_pattern_strings.extend(patterns);
         Ok(self)
     }

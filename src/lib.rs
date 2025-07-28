@@ -19,6 +19,8 @@ pub mod git;
 pub mod hook_chaining;
 pub mod install;
 pub mod language;
+pub mod lock_free_cache;
+pub mod lock_free_scheduler;
 pub mod logging;
 pub mod migration;
 pub mod negative_cache;
@@ -80,6 +82,11 @@ pub use language::{
     IsolationLevel, Language, LanguageEnvironment, LanguageError, LanguageHookExecutor,
     LanguageRegistry, PluginMetadata, ResolvedDependency, UpdateResult, ValidationIssue,
     ValidationReport, VersionSpec,
+    registry::{RegistryConfig, RegistryStats},
+};
+pub use lock_free_cache::{CacheStats, LockFreeCache};
+pub use lock_free_scheduler::{
+    LoadBalanceMetrics, LockFreeTaskScheduler, ScheduledTask, SchedulerStats, WorkerState,
 };
 pub use logging::{ColorConfig, LogConfig, LogFormat};
 pub use migration::{
