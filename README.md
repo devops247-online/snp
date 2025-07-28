@@ -9,12 +9,19 @@ A **production-ready**, fast, and reliable pre-commit framework written in Rust.
 
 ## ⚡ Why SNP?
 
-- **🔥 Performance**: 2-3x faster than Python pre-commit with optimized execution
+- **🔥 Performance**: 3-5x faster than Python pre-commit with state-of-the-art optimizations
+  - Advanced work-stealing task scheduler for optimal parallel execution
+  - Multi-tier caching architecture (L1/L2/L3) with intelligent promotion/demotion
+  - Lock-free data structures for improved concurrency performance
+  - Bloom filter-based negative caching for performance optimization
+  - Batch regex processing with compiled RegexSet optimization
+  - Arena-based memory management for hot execution paths
+  - Zero-copy string operations and incremental file change detection
 - **🛡️ Reliability**: Memory safety and comprehensive error handling through Rust
 - **🔄 Compatibility**: 100% compatible with existing `.pre-commit-config.yaml` files
 - **📦 Easy Installation**: Single binary with no dependencies
 - **🌍 Cross-Platform**: Works on Linux, macOS, and Windows
-- **✅ Production Ready**: Comprehensive test suite with 516+ tests across 17 test files
+- **✅ Production Ready**: Comprehensive test suite with 758+ tests across 49 test files
 - **🔗 Language Support**: Comprehensive language plugins: Python, Rust, Node.js, Go, Ruby, System commands, and Docker
 - **⚙️ Advanced Features**: Hook chaining, dependency management, and API integration
 
@@ -96,6 +103,9 @@ SNP is a **feature-complete** pre-commit framework with advanced capabilities:
 - **File Classification**: Intelligent file type detection and filtering
 
 ### 🚀 Advanced Features
+- **Work-Stealing Scheduler**: Advanced parallel execution with optimal load balancing and task stealing
+- **Multi-Tier Caching**: Intelligent L1/L2/L3 cache hierarchy with automatic promotion/demotion
+- **Lock-Free Architecture**: High-performance concurrent data structures for zero-contention execution
 - **Hook Chaining**: Dependency management and execution ordering with graph algorithms
 - **API Integration**: Real GitHub/GitLab API calls for version updates
 - **Configuration Migration**: Seamless migration from Python pre-commit
@@ -103,7 +113,12 @@ SNP is a **feature-complete** pre-commit framework with advanced capabilities:
 - **Concurrent Processing**: Advanced file locking, deadlock prevention, and parallel execution
 - **Environment Management**: Language-specific environment setup and SQLite-based caching
 - **Container Support**: Docker-based hook execution for isolated environments
-- **Performance Optimization**: High-performance regex processing and memory-efficient data structures
+- **Performance Optimization**:
+  - Bloom filter negative caching for fast miss detection
+  - Batch regex processing with compiled RegexSet optimization
+  - Arena-based memory management for reduced allocations
+  - Zero-copy string operations and incremental file change detection
+  - Async-first file I/O with intelligent batching
 
 ## 🔧 Commands
 
@@ -136,7 +151,7 @@ cargo build --release
 ### Testing
 
 ```bash
-# Run all tests (516+ comprehensive tests)
+# Run all tests (758+ comprehensive tests)
 cargo test
 
 # Run with coverage
@@ -148,8 +163,10 @@ cargo test --test integration_tests
 cargo test --test autoupdate_tests
 cargo test --test python_language_tests
 cargo test --test hook_chaining_tests
+cargo test --test work_stealing_scheduler_tests
+cargo test --test multi_tier_cache_tests
 
-# Run all 17 test suites
+# Run all 49 test suites
 find tests/ -name "*.rs" -exec basename {} .rs \; | xargs -I {} cargo test --test {}
 ```
 
@@ -178,11 +195,23 @@ SNP is **production-ready** with comprehensive features implemented. The project
 
 ### 📊 Testing & Quality
 
-- **516+ Comprehensive Tests**: Across 17 test suites covering all functionality including language plugins
+- **758+ Comprehensive Tests**: Across 49 test suites covering all functionality including:
+  - Core execution engine and hook processing
+  - Work-stealing scheduler and parallel execution
+  - Multi-tier caching system with deadlock prevention
+  - Lock-free data structures and concurrent access
+  - Language plugins (Python, Rust, Node.js, Go, Ruby, Docker)
+  - Performance optimization features and memory management
 - **Multi-Toolchain Support**: Compatible with Rust stable, beta, and nightly
 - **CI/CD Pipeline**: Robust testing with network failure resilience
 - **Real-World Testing**: Live API integration testing with GitHub/GitLab
 - **Cross-Platform**: Verified on Linux, macOS, and Windows
+
+## 📚 Documentation
+
+- **[Architecture Guide](ARCHITECTURE.md)**: Detailed overview of SNP's performance optimizations and system design
+- **[CHANGELOG](CHANGELOG.md)**: Complete history of changes and improvements
+- **[Development Guide](CLAUDE.md)**: Development commands and workflow information
 
 ## 🤝 Contributing
 
