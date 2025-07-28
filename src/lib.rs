@@ -10,6 +10,7 @@ pub mod config;
 pub mod core;
 pub mod enhanced_regex_processor;
 pub mod error;
+pub mod events;
 pub mod execution;
 pub mod file_change_detector;
 pub mod file_lock;
@@ -44,6 +45,10 @@ pub use enhanced_regex_processor::{CachePerformanceReport, EnhancedRegexProcesso
 pub use error::{
     exit_codes, CliError, ConfigError, GitError, HookChainingError, HookExecutionError, LockError,
     ProcessError, Result, SnpError, StorageError,
+};
+pub use events::{
+    EventBus, EventConfig, EventFilter, EventHandler, EventHandlerPriority, EventMetrics,
+    HookEvent, HookEventType, LoggingEventHandler, MetricsEventHandler,
 };
 pub use execution::{ExecutionConfig, ExecutionResult, HookExecutionEngine, HookExecutionResult};
 pub use file_change_detector::{FileChangeDetector, FileChangeDetectorConfig};
