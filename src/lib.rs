@@ -28,6 +28,7 @@ pub mod output;
 pub mod pooled_git;
 pub mod pooled_language;
 pub mod process;
+pub mod recovery;
 pub mod regex_processor;
 pub mod resource_pool;
 pub mod resource_pool_manager;
@@ -115,6 +116,13 @@ pub use pooled_language::{
 };
 pub use process::{
     OutputHandler, ProcessConfig, ProcessEnvironment, ProcessManager, ProcessResult,
+};
+pub use recovery::{
+    CheckNetworkConnectivityAction, DegradationLevel, ErrorSeverity, ErrorType,
+    FixFilePermissionsAction, InstallEnvironmentAction, RecloneRepositoryAction, Recoverable,
+    RecoverableError, RecoveryAction, RecoveryConfig, RecoveryContext, RecoveryEngine,
+    RecoveryError, RecoveryParameters, RecoveryResult, RecoveryStatistics, RecoveryStrategy,
+    RecoverySuggestion,
 };
 pub use regex_processor::{
     BatchRegexConfig, BatchRegexProcessor, CompiledRegex, MatchMatrix,
