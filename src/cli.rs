@@ -2,6 +2,7 @@
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 
+use crate::cache::CacheConfig;
 use crate::commands::run;
 use crate::core::Stage;
 use crate::error::Result;
@@ -35,6 +36,32 @@ pub struct Cli {
     /// Control color output (auto, always, never)
     #[arg(long, global = true, value_name = "WHEN")]
     pub color: Option<String>,
+
+    /// Disable multi-tier regex cache
+    #[arg(long, global = true)]
+    pub no_cache: bool,
+
+    /// Set L1 cache size (hot patterns)
+    #[arg(long, global = true, value_name = "SIZE")]
+    pub cache_l1_size: Option<usize>,
+
+    /// Set L2 cache size (warm patterns)
+    #[arg(long, global = true, value_name = "SIZE")]
+    pub cache_l2_size: Option<usize>,
+}
+
+impl Cli {
+    /// Create cache configuration from CLI arguments
+    pub fn cache_config(&self) -> CacheConfig {
+        CacheConfig {
+            l1_max_entries: self.cache_l1_size.unwrap_or(500),
+            l2_max_entries: self.cache_l2_size.unwrap_or(2000),
+            promotion_threshold: 2,
+            enable_l3_persistence: !self.no_cache,
+            cache_warming: !self.no_cache,
+            metrics_enabled: true,
+        }
+    }
 }
 
 #[derive(Subcommand)]

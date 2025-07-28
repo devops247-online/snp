@@ -5,42 +5,62 @@ use crate::regex_processor::{CompiledRegex, PatternAnalyzer, RegexConfig, RegexE
 use regex::{Regex, RegexBuilder};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 
 /// Enhanced regex processor with multi-tier caching
+#[derive(Clone)]
 pub struct EnhancedRegexProcessor {
-    cache: MultiTierCache<String, Arc<Regex>>,
-    compilation_cache: MultiTierCache<String, CompiledRegex>,
+    cache: Arc<Mutex<MultiTierCache<String, Arc<Regex>>>>,
+    compilation_cache: Arc<Mutex<MultiTierCache<String, CompiledRegex>>>,
     config: RegexConfig,
     max_complexity: f64,
     compilation_timeout: Duration,
 }
 
+impl Default for EnhancedRegexProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EnhancedRegexProcessor {
-    /// Create a new enhanced regex processor with multi-tier caching
-    pub async fn new(config: RegexConfig) -> crate::Result<Self> {
-        let cache_config = CacheConfig {
-            l1_max_entries: 500,         // Hot regex patterns
-            l2_max_entries: 2000,        // Warm regex patterns
-            promotion_threshold: 2,      // Promote after 2 accesses
-            enable_l3_persistence: true, // Store in SQLite
-            cache_warming: true,         // Enable cache warming
-            metrics_enabled: true,       // Enable metrics
-        };
-
-        let cache = MultiTierCache::with_config(cache_config.clone()).await?;
-        let compilation_cache = MultiTierCache::with_config(cache_config).await?;
-
-        Ok(Self {
-            cache,
-            compilation_cache,
-            config,
-            max_complexity: 100.0,
-            compilation_timeout: Duration::from_millis(500),
-        })
+    /// Create a new enhanced regex processor with default configuration (blocking version)
+    pub fn new() -> Self {
+        Self::with_cache_config(CacheConfig::default())
     }
 
     /// Create with custom cache configuration
-    pub async fn with_cache_config(
+    pub fn with_cache_config(cache_config: CacheConfig) -> Self {
+        let regex_config = RegexConfig::default();
+
+        // For sync usage, disable SQLite to avoid database locking in tests
+        let mut safe_cache_config = cache_config;
+        safe_cache_config.enable_l3_persistence = false;
+
+        // Initialize a basic runtime for simple usage
+        // In real async contexts, use new_async instead
+        let rt = std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                Self::new_async_with_config(regex_config, safe_cache_config)
+                    .await
+                    .expect("Failed to initialize enhanced regex processor")
+            })
+        })
+        .join()
+        .expect("Thread join failed");
+
+        rt
+    }
+
+    /// Create a new enhanced regex processor with multi-tier caching (async version)
+    pub async fn new_async(config: RegexConfig) -> crate::Result<Self> {
+        let cache_config = CacheConfig::default();
+        Self::new_async_with_config(config, cache_config).await
+    }
+
+    /// Create with custom config (async version)
+    pub async fn new_async_with_config(
         regex_config: RegexConfig,
         cache_config: CacheConfig,
     ) -> crate::Result<Self> {
@@ -48,19 +68,35 @@ impl EnhancedRegexProcessor {
         let compilation_cache = MultiTierCache::with_config(cache_config).await?;
 
         Ok(Self {
-            cache,
-            compilation_cache,
+            cache: Arc::new(Mutex::new(cache)),
+            compilation_cache: Arc::new(Mutex::new(compilation_cache)),
             config: regex_config,
             max_complexity: 100.0,
             compilation_timeout: Duration::from_millis(500),
         })
     }
 
+    /// Compile a regex pattern (blocking synchronous version)
+    pub fn compile_regex(&self, pattern: &str) -> crate::Result<Arc<Regex>> {
+        // Check if we're in an async context - if so, we cannot use this method
+        if tokio::runtime::Handle::try_current().is_ok() {
+            // We're in an async context - caller should use compile() instead
+            panic!("Cannot use compile_regex from within async context. Use compile() instead.");
+        }
+
+        // Create new runtime only if we're not in an async context
+        let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+        rt.block_on(async { self.compile(pattern).await })
+    }
+
     /// Compile a regex pattern with multi-tier caching
-    pub async fn compile(&mut self, pattern: &str) -> crate::Result<Arc<Regex>> {
+    pub async fn compile(&self, pattern: &str) -> crate::Result<Arc<Regex>> {
         // Check multi-tier cache first
-        if let Some(cached_regex) = self.cache.get(&pattern.to_string()).await? {
-            return Ok(cached_regex);
+        {
+            let cache_guard = self.cache.lock().await;
+            if let Some(cached_regex) = cache_guard.get(&pattern.to_string()).await? {
+                return Ok(cached_regex);
+            }
         }
 
         // Cache miss - compile new pattern
@@ -132,27 +168,45 @@ impl EnhancedRegexProcessor {
         let arc_regex = Arc::new(regex);
 
         // Store in multi-tier cache
-        self.cache
-            .put(pattern.to_string(), arc_regex.clone())
-            .await?;
+        {
+            let mut cache_guard = self.cache.lock().await;
+            cache_guard
+                .put(pattern.to_string(), arc_regex.clone())
+                .await?;
+        }
 
         // Store compilation metadata
-        self.compilation_cache
-            .put(pattern.to_string(), compiled_regex)
-            .await?;
+        {
+            let mut compilation_cache_guard = self.compilation_cache.lock().await;
+            compilation_cache_guard
+                .put(pattern.to_string(), compiled_regex)
+                .await?;
+        }
 
         Ok(arc_regex)
     }
 
+    /// Check if pattern matches text (blocking synchronous version)
+    pub fn is_match(&self, pattern: &str, text: &str) -> crate::Result<bool> {
+        // Check if we're in an async context - if so, we cannot use this method
+        if tokio::runtime::Handle::try_current().is_ok() {
+            // We're in an async context - caller should use is_match_async() instead
+            panic!("Cannot use is_match from within async context. Use is_match_async() instead.");
+        }
+
+        let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+        rt.block_on(async { self.is_match_async(pattern, text).await })
+    }
+
     /// Check if pattern matches text using multi-tier cached regex
-    pub async fn is_match(&mut self, pattern: &str, text: &str) -> crate::Result<bool> {
+    pub async fn is_match_async(&self, pattern: &str, text: &str) -> crate::Result<bool> {
         let regex = self.compile(pattern).await?;
         Ok(regex.is_match(text))
     }
 
     /// Find all matches in text using multi-tier cached regex
     pub async fn find_matches<'a>(
-        &mut self,
+        &self,
         pattern: &str,
         text: &'a str,
     ) -> crate::Result<Vec<regex::Match<'a>>> {
@@ -162,7 +216,8 @@ impl EnhancedRegexProcessor {
 
     /// Get compilation metadata for a pattern
     pub async fn get_compilation_info(&self, pattern: &str) -> Option<CompiledRegex> {
-        self.compilation_cache
+        let compilation_cache_guard = self.compilation_cache.lock().await;
+        compilation_cache_guard
             .get(&pattern.to_string())
             .await
             .ok()
@@ -170,9 +225,15 @@ impl EnhancedRegexProcessor {
     }
 
     /// Warm the cache with commonly used patterns
-    pub async fn warm_cache(&mut self, patterns: &[String]) -> crate::Result<()> {
-        self.cache.warm_cache(patterns).await?;
-        self.compilation_cache.warm_cache(patterns).await?;
+    pub async fn warm_cache(&self, patterns: &[String]) -> crate::Result<()> {
+        {
+            let mut cache_guard = self.cache.lock().await;
+            cache_guard.warm_cache(patterns).await?;
+        }
+        {
+            let mut compilation_cache_guard = self.compilation_cache.lock().await;
+            compilation_cache_guard.warm_cache(patterns).await?;
+        }
         Ok(())
     }
 
@@ -180,27 +241,45 @@ impl EnhancedRegexProcessor {
     pub async fn get_cache_metrics(
         &self,
     ) -> (crate::cache::CacheMetrics, crate::cache::CacheMetrics) {
-        let regex_metrics = self.cache.get_metrics().await;
-        let compilation_metrics = self.compilation_cache.get_metrics().await;
+        let regex_metrics = {
+            let cache_guard = self.cache.lock().await;
+            cache_guard.get_metrics().await
+        };
+        let compilation_metrics = {
+            let compilation_cache_guard = self.compilation_cache.lock().await;
+            compilation_cache_guard.get_metrics().await
+        };
         (regex_metrics, compilation_metrics)
     }
 
     /// Clear all caches
-    pub async fn clear_cache(&mut self) -> crate::Result<()> {
-        self.cache.clear().await?;
-        self.compilation_cache.clear().await?;
+    pub async fn clear_cache(&self) -> crate::Result<()> {
+        {
+            let mut cache_guard = self.cache.lock().await;
+            cache_guard.clear().await?;
+        }
+        {
+            let mut compilation_cache_guard = self.compilation_cache.lock().await;
+            compilation_cache_guard.clear().await?;
+        }
         Ok(())
     }
 
     /// Evict old entries from cache
-    pub async fn evict_old_entries(&mut self, max_age: Duration) -> crate::Result<()> {
-        self.cache.evict_older_than(max_age).await?;
-        self.compilation_cache.evict_older_than(max_age).await?;
+    pub async fn evict_old_entries(&self, max_age: Duration) -> crate::Result<()> {
+        {
+            let mut cache_guard = self.cache.lock().await;
+            cache_guard.evict_older_than(max_age).await?;
+        }
+        {
+            let mut compilation_cache_guard = self.compilation_cache.lock().await;
+            compilation_cache_guard.evict_older_than(max_age).await?;
+        }
         Ok(())
     }
 
     /// Batch compile multiple patterns efficiently
-    pub async fn batch_compile(&mut self, patterns: &[String]) -> crate::Result<Vec<Arc<Regex>>> {
+    pub async fn batch_compile(&self, patterns: &[String]) -> crate::Result<Vec<Arc<Regex>>> {
         let mut results = Vec::with_capacity(patterns.len());
 
         for pattern in patterns {
@@ -307,15 +386,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_enhanced_regex_processor_creation() {
-        let processor = EnhancedRegexProcessor::new(RegexConfig::default()).await;
-        assert!(processor.is_ok());
+        let _processor = EnhancedRegexProcessor::new();
+        // If we reach this point, creation was successful
     }
 
     #[tokio::test]
     async fn test_pattern_compilation_and_caching() {
-        let mut processor = EnhancedRegexProcessor::new(RegexConfig::default())
-            .await
-            .unwrap();
+        let processor = EnhancedRegexProcessor::new();
 
         // First compilation - should be a cache miss
         let regex1 = processor.compile(r"\d+").await.unwrap();
@@ -332,12 +409,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_match_with_caching() {
-        let mut processor = EnhancedRegexProcessor::new(RegexConfig::default())
-            .await
-            .unwrap();
+        let processor = EnhancedRegexProcessor::new();
 
-        let result1 = processor.is_match(r"\d+", "123").await.unwrap();
-        let result2 = processor.is_match(r"\d+", "abc").await.unwrap();
+        let result1 = processor.is_match(r"\d+", "123").unwrap();
+        let result2 = processor.is_match(r"\d+", "abc").unwrap();
 
         assert!(result1);
         assert!(!result2);
@@ -349,9 +424,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_batch_compilation() {
-        let mut processor = EnhancedRegexProcessor::new(RegexConfig::default())
-            .await
-            .unwrap();
+        let processor = EnhancedRegexProcessor::new();
 
         let patterns = vec![
             r"\d+".to_string(),
@@ -370,14 +443,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_performance_analysis() {
-        let mut processor = EnhancedRegexProcessor::new(RegexConfig::default())
-            .await
-            .unwrap();
+        let processor = EnhancedRegexProcessor::new();
 
         // Use the processor to generate some metrics
-        processor.is_match(r"\d+", "123").await.unwrap();
-        processor.is_match(r"[a-z]+", "abc").await.unwrap();
-        processor.is_match(r"\d+", "456").await.unwrap(); // Cache hit
+        processor.is_match(r"\d+", "123").unwrap();
+        processor.is_match(r"[a-z]+", "abc").unwrap();
+        processor.is_match(r"\d+", "456").unwrap(); // Cache hit
 
         let report = processor.analyze_cache_performance().await;
         assert!(report.overall_hit_rate >= 0.0);

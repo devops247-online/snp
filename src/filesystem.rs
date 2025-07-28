@@ -2,7 +2,6 @@
 // Comprehensive file system operations with cross-platform path handling,
 // file type detection, and efficient file processing utilities.
 
-use regex::Regex;
 use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Write};
@@ -13,6 +12,7 @@ use std::time::Duration;
 use futures::stream::{self, StreamExt};
 use tokio::sync::Semaphore;
 
+use crate::enhanced_regex_processor::EnhancedRegexProcessor;
 use crate::error::{ConfigError, Result, SnpError};
 
 /// File system utilities for cross-platform operations
@@ -304,19 +304,21 @@ impl FileSystem {
 
 /// File filter for pattern matching and type-based filtering
 pub struct FileFilter {
-    include_patterns: Vec<Regex>,
-    exclude_patterns: Vec<Regex>,
+    include_pattern_strings: Vec<String>,
+    exclude_pattern_strings: Vec<String>,
     file_types: HashSet<String>,
     exclude_types: HashSet<String>,
+    regex_processor: Arc<EnhancedRegexProcessor>,
 }
 
 impl Clone for FileFilter {
     fn clone(&self) -> Self {
         Self {
-            include_patterns: self.include_patterns.clone(),
-            exclude_patterns: self.exclude_patterns.clone(),
+            include_pattern_strings: self.include_pattern_strings.clone(),
+            exclude_pattern_strings: self.exclude_pattern_strings.clone(),
             file_types: self.file_types.clone(),
             exclude_types: self.exclude_types.clone(),
+            regex_processor: Arc::clone(&self.regex_processor),
         }
     }
 }
@@ -324,45 +326,56 @@ impl Clone for FileFilter {
 impl FileFilter {
     /// Create a new file filter
     pub fn new() -> Self {
+        // Create enhanced regex processor with default configuration
+        // This will use the multi-tier cache for optimal performance
+        let regex_processor = Arc::new(EnhancedRegexProcessor::new());
+
         Self {
-            include_patterns: Vec::new(),
-            exclude_patterns: Vec::new(),
+            include_pattern_strings: Vec::new(),
+            exclude_pattern_strings: Vec::new(),
             file_types: HashSet::new(),
             exclude_types: HashSet::new(),
+            regex_processor,
         }
     }
 
     /// Add include patterns (files that match these patterns will be included)
     pub fn with_include_patterns(mut self, patterns: Vec<String>) -> Result<Self> {
-        for pattern in patterns {
-            let regex = Regex::new(&pattern).map_err(|e| {
-                SnpError::Config(Box::new(ConfigError::InvalidRegex {
-                    pattern: pattern.clone(),
-                    field: "include".to_string(),
-                    error: e.to_string(),
-                    file_path: None,
-                    line: None,
-                }))
-            })?;
-            self.include_patterns.push(regex);
+        // Skip validation here - it will happen lazily during matches
+        // This avoids async/sync conflicts
+        self.include_pattern_strings.extend(patterns);
+        Ok(self)
+    }
+
+    /// Async version of with_include_patterns that validates patterns
+    pub async fn with_include_patterns_async(mut self, patterns: Vec<String>) -> Result<Self> {
+        // Validate patterns by attempting to compile them
+        for pattern in &patterns {
+            // Use the enhanced regex processor to validate the pattern
+            // This will also cache the compiled regex for future use
+            self.regex_processor.compile(pattern).await?;
         }
+        self.include_pattern_strings.extend(patterns);
         Ok(self)
     }
 
     /// Add exclude patterns (files that match these patterns will be excluded)
     pub fn with_exclude_patterns(mut self, patterns: Vec<String>) -> Result<Self> {
-        for pattern in patterns {
-            let regex = Regex::new(&pattern).map_err(|e| {
-                SnpError::Config(Box::new(ConfigError::InvalidRegex {
-                    pattern: pattern.clone(),
-                    field: "exclude".to_string(),
-                    error: e.to_string(),
-                    file_path: None,
-                    line: None,
-                }))
-            })?;
-            self.exclude_patterns.push(regex);
+        // Skip validation here - it will happen lazily during matches
+        // This avoids async/sync conflicts
+        self.exclude_pattern_strings.extend(patterns);
+        Ok(self)
+    }
+
+    /// Async version of with_exclude_patterns that validates patterns
+    pub async fn with_exclude_patterns_async(mut self, patterns: Vec<String>) -> Result<Self> {
+        // Validate patterns by attempting to compile them
+        for pattern in &patterns {
+            // Use the enhanced regex processor to validate the pattern
+            // This will also cache the compiled regex for future use
+            self.regex_processor.compile(pattern).await?;
         }
+        self.exclude_pattern_strings.extend(patterns);
         Ok(self)
     }
 
@@ -380,21 +393,44 @@ impl FileFilter {
 
     /// Check if a file matches this filter
     pub fn matches(&self, path: &Path) -> Result<bool> {
+        // For synchronous usage, we need to handle this without creating a runtime
+        // if we're already in an async context. Use a simple regex compilation
+        // without the multi-tier cache for sync contexts.
+        use regex::Regex;
+
         let normalized_path = FileSystem::normalize_path(path);
         let path_str = normalized_path.to_string_lossy();
 
         // Check exclude patterns first (early exit if excluded)
-        for exclude_pattern in &self.exclude_patterns {
-            if exclude_pattern.is_match(&path_str) {
+        for exclude_pattern_str in &self.exclude_pattern_strings {
+            let regex = Regex::new(exclude_pattern_str).map_err(|e| {
+                SnpError::Config(Box::new(ConfigError::InvalidRegex {
+                    pattern: exclude_pattern_str.clone(),
+                    field: "exclude".to_string(),
+                    error: e.to_string(),
+                    file_path: Some(path.to_path_buf()),
+                    line: None,
+                }))
+            })?;
+            if regex.is_match(&path_str) {
                 return Ok(false);
             }
         }
 
         // Check include patterns (if any are specified, at least one must match)
-        if !self.include_patterns.is_empty() {
+        if !self.include_pattern_strings.is_empty() {
             let mut matches_include = false;
-            for include_pattern in &self.include_patterns {
-                if include_pattern.is_match(&path_str) {
+            for include_pattern_str in &self.include_pattern_strings {
+                let regex = Regex::new(include_pattern_str).map_err(|e| {
+                    SnpError::Config(Box::new(ConfigError::InvalidRegex {
+                        pattern: include_pattern_str.clone(),
+                        field: "include".to_string(),
+                        error: e.to_string(),
+                        file_path: Some(path.to_path_buf()),
+                        line: None,
+                    }))
+                })?;
+                if regex.is_match(&path_str) {
                     matches_include = true;
                     break;
                 }
@@ -464,17 +500,25 @@ impl FileFilter {
         let path_str = normalized_path.to_string_lossy();
 
         // Check exclude patterns first (early exit if excluded)
-        for exclude_pattern in &self.exclude_patterns {
-            if exclude_pattern.is_match(&path_str) {
+        for exclude_pattern_str in &self.exclude_pattern_strings {
+            if self
+                .regex_processor
+                .is_match_async(exclude_pattern_str, &path_str)
+                .await?
+            {
                 return Ok(false);
             }
         }
 
         // Check include patterns (if any are specified, at least one must match)
-        if !self.include_patterns.is_empty() {
+        if !self.include_pattern_strings.is_empty() {
             let mut matches_include = false;
-            for include_pattern in &self.include_patterns {
-                if include_pattern.is_match(&path_str) {
+            for include_pattern_str in &self.include_pattern_strings {
+                if self
+                    .regex_processor
+                    .is_match_async(include_pattern_str, &path_str)
+                    .await?
+                {
                     matches_include = true;
                     break;
                 }

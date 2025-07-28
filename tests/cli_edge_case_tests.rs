@@ -648,6 +648,9 @@ mod cli_edge_case_tests {
             quiet: false,
             config: "/non/existent/directory/config.yaml".to_string(),
             color: None,
+            no_cache: false,
+            cache_l1_size: None,
+            cache_l2_size: None,
         };
 
         // The actual runtime validation would happen in cli.run()
