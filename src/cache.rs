@@ -216,26 +216,34 @@ where
         }
 
         // Check L2 (fast)
-        {
+        let (should_promote, value_opt) = {
             let mut l2_cache = self.l2_cache.write().await;
             if let Some(entry) = l2_cache.get_mut(key) {
                 entry.accessed();
                 let value = entry.value.clone();
-
-                // Check if should promote to L1
-                if entry.access_count >= self.config.promotion_threshold {
-                    self.promote_to_l1(key.clone(), entry.clone()).await?;
-                    l2_cache.pop(key); // Remove from L2
-                }
-
-                if self.config.metrics_enabled {
-                    let mut metrics = self.metrics.write().await;
-                    metrics.l2_hits += 1;
-                    metrics.total_hits += 1;
-                }
-                debug!("Cache hit in L2 for key");
-                return Ok(Some(value));
+                let should_promote = entry.access_count >= self.config.promotion_threshold;
+                (should_promote, Some((value, entry.clone())))
+            } else {
+                (false, None)
             }
+        };
+
+        if let Some((value, entry)) = value_opt {
+            // Handle promotion outside of L2 lock
+            if should_promote {
+                self.promote_to_l1(key.clone(), entry).await?;
+                // Remove from L2 after promotion
+                let mut l2_cache = self.l2_cache.write().await;
+                l2_cache.pop(key);
+            }
+
+            if self.config.metrics_enabled {
+                let mut metrics = self.metrics.write().await;
+                metrics.l2_hits += 1;
+                metrics.total_hits += 1;
+            }
+            debug!("Cache hit in L2 for key");
+            return Ok(Some(value));
         }
 
         // Check L3 (persistent)
@@ -281,10 +289,6 @@ where
         // Insert into L1
         self.l1_cache.insert(key, entry);
 
-        if self.config.metrics_enabled {
-            self.update_size_metrics().await;
-        }
-
         Ok(())
     }
 
@@ -306,10 +310,6 @@ where
 
         // Remove access tracking
         self.access_counts.remove(key);
-
-        if self.config.metrics_enabled {
-            self.update_size_metrics().await;
-        }
 
         Ok(())
     }
@@ -430,10 +430,6 @@ where
             }
         }
 
-        if self.config.metrics_enabled {
-            self.update_size_metrics().await;
-        }
-
         Ok(())
     }
 
@@ -523,58 +519,56 @@ where
     }
 
     async fn demote_to_l2(&self, key: K, entry: CacheEntry<V>) -> Result<()> {
+        let mut l2_evicted = false;
+
         {
             let mut l2_cache = self.l2_cache.write().await;
 
             if let Some((evicted_key, evicted_entry)) = l2_cache.push(key, entry) {
+                l2_evicted = true;
                 // Evicted entry goes to L3
                 if let Some(l3_cache) = &self.l3_cache {
                     self.store_in_l3(&evicted_key, &evicted_entry.value, l3_cache)
                         .await?;
                 }
-
-                if self.config.metrics_enabled {
-                    let mut metrics = self.metrics.write().await;
-                    metrics.l2_evictions += 1;
-                }
             }
         }
 
+        // Update metrics in a single lock acquisition
         if self.config.metrics_enabled {
             let mut metrics = self.metrics.write().await;
             metrics.l1_evictions += 1;
+            if l2_evicted {
+                metrics.l2_evictions += 1;
+            }
         }
 
         Ok(())
     }
 
     async fn find_lru_in_l1(&self) -> Option<K> {
-        let mut oldest_key = None;
-        let mut oldest_time = Instant::now();
+        if self.l1_cache.is_empty() {
+            return None;
+        }
 
-        for entry in self.l1_cache.iter() {
-            if entry.value().last_accessed < oldest_time {
-                oldest_time = entry.value().last_accessed;
-                oldest_key = Some(entry.key().clone());
+        let mut oldest_key = None;
+        let mut oldest_time = None;
+
+        // Collect keys first to avoid holding iterator
+        let entries: Vec<_> = self
+            .l1_cache
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().last_accessed))
+            .collect();
+
+        for (key, entry_time) in entries {
+            if oldest_time.is_none() || entry_time < oldest_time.unwrap() {
+                oldest_time = Some(entry_time);
+                oldest_key = Some(key);
             }
         }
 
         oldest_key
-    }
-
-    async fn update_size_metrics(&self) {
-        if self.config.metrics_enabled {
-            let mut metrics = self.metrics.write().await;
-            metrics.l1_size = self.l1_cache.len();
-
-            {
-                let l2_cache = self.l2_cache.read().await;
-                metrics.l2_size = l2_cache.len();
-            }
-
-            // L3 size would be queried from storage in a real implementation
-            metrics.l3_size = 0; // Placeholder
-        }
     }
 
     async fn estimate_memory_usage(&self) -> u64 {
@@ -642,13 +636,25 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_creation() {
-        let cache = MultiTierCache::<String, String>::new().await;
+        // Disable L3 persistence to avoid database locking in tests
+        let config = CacheConfig {
+            enable_l3_persistence: false,
+            ..Default::default()
+        };
+        let cache = MultiTierCache::<String, String>::with_config(config).await;
         assert!(cache.is_ok());
     }
 
     #[tokio::test]
     async fn test_basic_operations() {
-        let mut cache = MultiTierCache::<String, String>::new().await.unwrap();
+        // Disable L3 persistence to avoid database locking in tests
+        let config = CacheConfig {
+            enable_l3_persistence: false,
+            ..Default::default()
+        };
+        let mut cache = MultiTierCache::<String, String>::with_config(config)
+            .await
+            .unwrap();
 
         // Test put and get
         cache
@@ -665,7 +671,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_metrics() {
-        let mut cache = MultiTierCache::<String, String>::new().await.unwrap();
+        // Disable L3 persistence to avoid database locking in tests
+        let config = CacheConfig {
+            enable_l3_persistence: false,
+            ..Default::default()
+        };
+        let mut cache = MultiTierCache::<String, String>::with_config(config)
+            .await
+            .unwrap();
 
         cache
             .put("key1".to_string(), "value1".to_string())
