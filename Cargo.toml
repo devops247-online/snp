@@ -59,7 +59,7 @@ daggy = "0.9"
 async-trait = "0.1"
 
 # Binary serialization for hook communication
-bincode = "1.3"
+bincode = "2.0"
 
 # Error handling
 anyhow = "1.0"
