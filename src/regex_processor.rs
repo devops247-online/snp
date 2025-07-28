@@ -4,6 +4,7 @@ use lru::LruCache;
 use parking_lot::Mutex;
 use regex::{Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 use regex_syntax::ParserBuilder;
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -762,6 +763,209 @@ impl BatchRegexProcessor {
             texts: texts.to_vec(),
             matches,
             processing_time: start_time.elapsed(),
+        })
+    }
+}
+
+/// Configuration for batch regex processing
+#[derive(Debug, Clone)]
+pub struct BatchRegexConfig {
+    pub enable_batch_processing: bool, // Default: true
+    pub min_patterns_for_batch: usize, // Default: 3
+    pub cache_size: usize,             // Default: 256
+    pub compile_timeout: Duration,     // Default: 5s
+    pub enable_optimization: bool,     // Default: true
+}
+
+impl Default for BatchRegexConfig {
+    fn default() -> Self {
+        Self {
+            enable_batch_processing: true,
+            min_patterns_for_batch: 3,
+            cache_size: 256,
+            compile_timeout: Duration::from_secs(5),
+            enable_optimization: true,
+        }
+    }
+}
+
+/// Detailed match information from batch processing
+#[derive(Debug, Clone)]
+pub struct RegexMatch {
+    pub pattern_name: String,
+    pub match_text: String,
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Compiled pattern set for batch processing
+#[derive(Debug, Clone)]
+struct CompiledRegexSet {
+    pattern_set: Arc<RegexSet>,
+    individual_regexes: Vec<Arc<Regex>>,
+    pattern_map: HashMap<usize, String>,
+    compilation_time: Duration,
+}
+
+/// Optimized batch regex processor using RegexSet for maximum performance
+pub struct OptimizedBatchRegexProcessor {
+    // Set for fast multi-pattern matching
+    compiled_set: CompiledRegexSet,
+
+    // Configuration
+    config: BatchRegexConfig,
+
+    // Future: Compilation cache for dynamic patterns
+    // cache: Arc<Mutex<LruCache<String, CompiledRegexSet>>>,
+}
+
+impl OptimizedBatchRegexProcessor {
+    /// Create a new batch processor with the given patterns
+    pub fn new(patterns: Vec<(String, String)>) -> crate::Result<Self> {
+        Self::with_config(patterns, BatchRegexConfig::default())
+    }
+
+    /// Create a new batch processor with custom configuration
+    pub fn with_config(
+        patterns: Vec<(String, String)>,
+        config: BatchRegexConfig,
+    ) -> crate::Result<Self> {
+        let compiled_set = Self::compile_pattern_set(patterns, &config)?;
+
+        Ok(Self {
+            compiled_set,
+            config,
+            // cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(cache_size).unwrap()))),
+        })
+    }
+
+    /// Check if any pattern matches the given text
+    pub fn any_matches(&self, text: &str) -> bool {
+        self.compiled_set.pattern_set.is_match(text)
+    }
+
+    /// Find all patterns that match the given text with detailed match information
+    pub fn match_all(&self, text: &str) -> Vec<RegexMatch> {
+        let matches = self.compiled_set.pattern_set.matches(text);
+
+        matches
+            .iter()
+            .filter_map(|idx| {
+                let regex = &self.compiled_set.individual_regexes[idx];
+                // For file pattern matching, we typically want the full match
+                // If there's a match, we return the matched portion
+                regex.find(text).map(|m| RegexMatch {
+                    pattern_name: self.compiled_set.pattern_map[&idx].clone(),
+                    match_text: text.to_string(), // Return full text for file matching compatibility
+                    start: m.start(),
+                    end: m.end(),
+                })
+            })
+            .collect()
+    }
+
+    /// Get the first match for any pattern
+    pub fn find_first_match(&self, text: &str) -> Option<RegexMatch> {
+        let matches = self.compiled_set.pattern_set.matches(text);
+
+        // Get the first matching pattern
+        matches.iter().next().and_then(|idx| {
+            let regex = &self.compiled_set.individual_regexes[idx];
+            regex.find(text).map(|m| RegexMatch {
+                pattern_name: self.compiled_set.pattern_map[&idx].clone(),
+                match_text: text.to_string(), // Return full text for file matching compatibility
+                start: m.start(),
+                end: m.end(),
+            })
+        })
+    }
+
+    /// Get configuration
+    pub fn get_config(&self) -> &BatchRegexConfig {
+        &self.config
+    }
+
+    /// Get compilation statistics
+    pub fn get_compilation_time(&self) -> Duration {
+        self.compiled_set.compilation_time
+    }
+
+    /// Compile a set of patterns into an optimized structure
+    fn compile_pattern_set(
+        patterns: Vec<(String, String)>,
+        config: &BatchRegexConfig,
+    ) -> crate::Result<CompiledRegexSet> {
+        let start_time = Instant::now();
+
+        if patterns.is_empty() {
+            // Handle empty pattern set gracefully
+            let empty_set = RegexSet::new(&[] as &[String]).map_err(|e| {
+                SnpError::Regex(Box::new(RegexError::InvalidPattern {
+                    pattern: "empty pattern set".to_string(),
+                    error: e,
+                    suggestion: Some("Provide at least one pattern".to_string()),
+                }))
+            })?;
+
+            return Ok(CompiledRegexSet {
+                pattern_set: Arc::new(empty_set),
+                individual_regexes: Vec::new(),
+                pattern_map: HashMap::new(),
+                compilation_time: start_time.elapsed(),
+            });
+        }
+
+        // Extract pattern strings for RegexSet
+        let pattern_strings: Vec<String> = patterns
+            .iter()
+            .map(|(_, pattern)| pattern.clone())
+            .collect();
+
+        // Compile RegexSet for fast multi-pattern matching
+        let pattern_set = RegexSet::new(&pattern_strings).map_err(|e| {
+            SnpError::Regex(Box::new(RegexError::InvalidPattern {
+                pattern: format!("RegexSet with {} patterns", patterns.len()),
+                error: e,
+                suggestion: Some("Check individual patterns for validity".to_string()),
+            }))
+        })?;
+
+        // Compile individual regexes for detailed matching
+        let mut individual_regexes = Vec::with_capacity(patterns.len());
+        for (_, pattern) in &patterns {
+            let regex = Regex::new(pattern).map_err(|e| {
+                SnpError::Regex(Box::new(RegexError::InvalidPattern {
+                    pattern: pattern.clone(),
+                    error: e.clone(),
+                    suggestion: RegexError::suggest_pattern_fix(pattern, &e),
+                }))
+            })?;
+            individual_regexes.push(Arc::new(regex));
+        }
+
+        // Create pattern name mapping
+        let pattern_map: HashMap<usize, String> = patterns
+            .into_iter()
+            .enumerate()
+            .map(|(i, (name, _))| (i, name))
+            .collect();
+
+        let compilation_time = start_time.elapsed();
+
+        // Check compilation timeout
+        if compilation_time > config.compile_timeout {
+            return Err(SnpError::Regex(Box::new(RegexError::CompilationTimeout {
+                pattern: format!("pattern set with {} patterns", pattern_map.len()),
+                duration: compilation_time,
+                timeout_limit: config.compile_timeout,
+            })));
+        }
+
+        Ok(CompiledRegexSet {
+            pattern_set: Arc::new(pattern_set),
+            individual_regexes,
+            pattern_map,
+            compilation_time,
         })
     }
 }
