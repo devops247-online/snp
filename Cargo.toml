@@ -134,6 +134,9 @@ notify = "8.1"
 filetime = "0.2"
 blake3 = "1.5"  # Fast cryptographic hashing for file change detection
 
+# Bloom filter for negative caching
+bloom = "0.3"
+
 # Date and time handling
 chrono = { version = "0.4", features = ["serde"] }
 
