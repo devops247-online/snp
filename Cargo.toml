@@ -123,7 +123,7 @@ num_cpus = "1.16"
 # System monitoring
 sysinfo = "0.36"
 whoami = "1.4"
-uuid = { version = "1.6", features = ["v4"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
 
 # Terminal detection
 is-terminal = "0.4"
