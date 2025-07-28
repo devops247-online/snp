@@ -1,6 +1,7 @@
 //! Benchmarks for logging system performance
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use snp::logging::{utils, ColorConfig, LogConfig, LogFormat};
+use std::hint::black_box;
 use std::time::Instant;
 use tracing::{debug, info, warn, Level};
 

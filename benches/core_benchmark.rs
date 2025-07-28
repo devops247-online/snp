@@ -1,5 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use snp::core::{ExecutionContext, Hook, Repository, Stage};
+use std::hint::black_box;
 use std::path::PathBuf;
 
 fn benchmark_core_performance(c: &mut Criterion) {

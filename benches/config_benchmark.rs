@@ -1,5 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use snp::config::Config;
+use std::hint::black_box;
 
 fn benchmark_config_parsing(c: &mut Criterion) {
     // Small config

@@ -2,9 +2,10 @@
 // Measures the performance improvement from arena-based memory management
 
 use bumpalo::Bump;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use snp::core::{ArenaExecutionContext, ExecutionContext, Hook, Stage};
 use std::collections::HashMap;
+use std::hint::black_box;
 use std::path::PathBuf;
 
 fn create_test_data(size: usize) -> (Vec<PathBuf>, HashMap<String, String>) {
