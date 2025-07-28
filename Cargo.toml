@@ -96,7 +96,7 @@ bumpalo = { version = "3.14", features = ["collections"] }
 libloading = "0.8"     # Dynamic library loading
 inventory = "0.3"      # Plugin registration and discovery
 semver = "1.0"         # Semantic version parsing and comparison
-dashmap = "5.5"        # Concurrent hash map for plugin registry
+dashmap = "6.1"        # Concurrent hash map for plugin registry
 toml = "0.9"           # Configuration file format
 
 # File classification dependencies
