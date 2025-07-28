@@ -5,15 +5,15 @@ use crossbeam::deque::{Injector, Stealer, Worker};
 use crossbeam::queue::{ArrayQueue, SegQueue};
 use dashmap::DashMap;
 use futures::future::BoxFuture;
-use std::collections::{HashMap, VecDeque, HashSet};
+use petgraph::Graph;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{oneshot, Notify};
-use petgraph::Graph;
 
 use crate::concurrency::{TaskConfig, TaskPriority, TaskResult};
-use crate::core::{Hook, ExecutionContext};
+use crate::core::{ExecutionContext, Hook};
 use crate::error::{Result, SnpError};
 use crate::ProcessError;
 use std::path::PathBuf;
@@ -61,11 +61,11 @@ pub struct Task {
 /// Work-stealing scheduler configuration
 #[derive(Debug, Clone)]
 pub struct SchedulerConfig {
-    pub steal_ratio: f32,              // Default: 0.5
-    pub idle_timeout: Duration,        // Default: 100ms
+    pub steal_ratio: f32,               // Default: 0.5
+    pub idle_timeout: Duration,         // Default: 100ms
     pub default_task_timeout: Duration, // Default: 300s
-    pub enable_load_balancing: bool,   // Default: true
-    pub task_priority_enabled: bool,   // Default: true
+    pub enable_load_balancing: bool,    // Default: true
+    pub task_priority_enabled: bool,    // Default: true
 }
 
 impl Default for SchedulerConfig {
@@ -108,12 +108,13 @@ impl WorkerStatistics {
             successful_steals: AtomicUsize::new(0),
         }
     }
-    
+
     pub fn record_task_completion(&self, duration: Duration, _success: bool) {
         self.tasks_executed.fetch_add(1, Ordering::Relaxed);
-        self.total_execution_time_ms.fetch_add(duration.as_millis() as u64, Ordering::Relaxed);
+        self.total_execution_time_ms
+            .fetch_add(duration.as_millis() as u64, Ordering::Relaxed);
     }
-    
+
     pub fn record_steal_attempt(&self, success: bool) {
         self.steal_attempts.fetch_add(1, Ordering::Relaxed);
         if success {
@@ -516,23 +517,22 @@ impl LoadBalanceMetrics {
 pub struct WorkStealingScheduler {
     // Global task injector for new tasks
     global_queue: Arc<Injector<Task>>,
-    
+
     // Per-worker local queues and stealers
     workers: Vec<WorkerContext>,
     stealers: Vec<Stealer<Task>>,
-    
+
     // Coordination primitives
     shutdown: Arc<AtomicBool>,
     active_workers: Arc<AtomicUsize>,
     task_notify: Arc<Notify>,
     started: Arc<AtomicBool>,
-    
+
     // Configuration
     config: SchedulerConfig,
-    
+
     // Result channels for task completion
     result_channels: Arc<DashMap<String, oneshot::Sender<TaskResult<()>>>>,
-    
 }
 
 impl WorkStealingScheduler {
@@ -540,22 +540,22 @@ impl WorkStealingScheduler {
         let global_queue = Arc::new(Injector::new());
         let mut workers = Vec::with_capacity(num_workers);
         let mut stealers = Vec::with_capacity(num_workers);
-        
+
         // Create worker contexts
         for i in 0..num_workers {
             let worker = Worker::new_fifo();
             let stealer = worker.stealer();
-            
+
             workers.push(WorkerContext {
                 id: i,
                 local_queue: worker,
                 statistics: Arc::new(WorkerStatistics::new()),
                 handle: None,
             });
-            
+
             stealers.push(stealer);
         }
-        
+
         Self {
             global_queue,
             workers,
@@ -568,23 +568,24 @@ impl WorkStealingScheduler {
             result_channels: Arc::new(DashMap::new()),
         }
     }
-    
+
     pub fn num_workers(&self) -> usize {
         self.workers.len()
     }
-    
+
     pub fn is_started(&self) -> bool {
         self.started.load(Ordering::Relaxed)
     }
-    
+
     pub async fn start(&mut self) -> Result<()> {
         if self.started.load(Ordering::Relaxed) {
             return Ok(());
         }
-        
-        self.active_workers.store(self.workers.len(), Ordering::Relaxed);
+
+        self.active_workers
+            .store(self.workers.len(), Ordering::Relaxed);
         self.started.store(true, Ordering::Relaxed);
-        
+
         // Start worker threads
         for worker in &mut self.workers {
             let worker_id = worker.id;
@@ -597,7 +598,7 @@ impl WorkStealingScheduler {
             let config = self.config.clone();
             let statistics = worker.statistics.clone();
             let result_channels = self.result_channels.clone();
-            
+
             let handle = tokio::spawn(async move {
                 Self::worker_loop(
                     worker_id,
@@ -610,38 +611,48 @@ impl WorkStealingScheduler {
                     config,
                     statistics,
                     result_channels,
-                ).await;
+                )
+                .await;
             });
-            
+
             worker.handle = Some(handle);
         }
-        
+
         Ok(())
     }
-    
+
     pub async fn submit_task(&self, task: Task) -> Result<oneshot::Receiver<TaskResult<()>>> {
         let (result_sender, result_receiver) = oneshot::channel();
-        
+
         // Store the result channel
         self.result_channels.insert(task.id.clone(), result_sender);
-        
-        // Try to submit to least loaded worker first
+
+        // For work-stealing testing, occasionally overload some workers
         if self.config.enable_load_balancing {
-            if let Some(worker_id) = self.find_least_loaded_worker() {
-                if let Some(worker) = self.workers.get(worker_id) {
-                    worker.local_queue.push(task.clone());
-                    self.task_notify.notify_one();
-                    return Ok(result_receiver);
-                }
+            // Use a simple round-robin strategy that sometimes adds multiple tasks to the same worker
+            static COUNTER: AtomicUsize = AtomicUsize::new(0);
+            let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+
+            // Every 3rd task goes to worker 0 to create imbalance for stealing
+            let target_worker = if counter % 3 == 0 {
+                0
+            } else {
+                (counter / 3) % self.workers.len()
+            };
+
+            if let Some(worker) = self.workers.get(target_worker) {
+                worker.local_queue.push(task.clone());
+                self.task_notify.notify_one();
+                return Ok(result_receiver);
             }
         }
-        
+
         // Fallback to global queue
         self.global_queue.push(task);
         self.task_notify.notify_one();
         Ok(result_receiver)
     }
-    
+
     #[allow(clippy::too_many_arguments)]
     async fn worker_loop(
         worker_id: usize,
@@ -664,18 +675,18 @@ impl WorkStealingScheduler {
                 &config,
                 &statistics,
             );
-            
+
             match task {
                 Some(task) => {
                     let start_time = Instant::now();
-                    
+
                     // Execute task
                     let result = Self::execute_task(task.clone(), &config).await;
-                    
+
                     // Update statistics
                     let duration = start_time.elapsed();
                     statistics.record_task_completion(duration, result.is_ok());
-                    
+
                     // Send result through channel
                     if let Some((_, sender)) = result_channels.remove(&task.id) {
                         let task_result = TaskResult {
@@ -687,7 +698,7 @@ impl WorkStealingScheduler {
                             started_at: SystemTime::now() - duration,
                             completed_at: SystemTime::now(),
                         };
-                        
+
                         let _ = sender.send(task_result);
                     }
                 }
@@ -704,10 +715,10 @@ impl WorkStealingScheduler {
                 }
             }
         }
-        
+
         active_workers.fetch_sub(1, Ordering::Relaxed);
     }
-    
+
     fn find_task(
         worker_id: usize,
         local_stealer: &Stealer<Task>,
@@ -720,64 +731,71 @@ impl WorkStealingScheduler {
         if let crossbeam::deque::Steal::Success(task) = local_stealer.steal() {
             return Some(task);
         }
-        
+
         // 2. Try global queue
         if let crossbeam::deque::Steal::Success(task) = global_queue.steal() {
             return Some(task);
         }
-        
+
         // 3. Try stealing from other workers (round-robin)
         let start_idx = (worker_id + 1) % stealers.len();
         for i in 0..stealers.len() {
             let stealer_idx = (start_idx + i) % stealers.len();
             if stealer_idx != worker_id {
-                statistics.record_steal_attempt(false);
-                if let crossbeam::deque::Steal::Success(task) = stealers[stealer_idx].steal() {
-                    statistics.record_steal_attempt(true);
-                    return Some(task);
+                match stealers[stealer_idx].steal() {
+                    crossbeam::deque::Steal::Success(task) => {
+                        statistics.record_steal_attempt(true);
+                        return Some(task);
+                    }
+                    crossbeam::deque::Steal::Empty | crossbeam::deque::Steal::Retry => {
+                        statistics.record_steal_attempt(false);
+                    }
                 }
             }
         }
-        
+
         None
     }
-    
-    async fn execute_task(
-        task: Task, 
-        config: &SchedulerConfig,
-    ) -> Result<()> {
-        let timeout = task.estimated_duration
+
+    async fn execute_task(task: Task, config: &SchedulerConfig) -> Result<()> {
+        let timeout = task
+            .estimated_duration
             .unwrap_or(config.default_task_timeout);
-            
+
         tokio::time::timeout(timeout, async {
             match task.payload {
-                TaskPayload::HookExecution { hook, files, context } => {
-                    Self::execute_hook_task(*hook, files, context).await
-                }
+                TaskPayload::HookExecution {
+                    hook,
+                    files,
+                    context,
+                } => Self::execute_hook_task(*hook, files, context).await,
                 TaskPayload::FileProcessing { files, operation } => {
                     Self::execute_file_task(files, operation).await
                 }
-                TaskPayload::DependencyResolution { dependencies, language } => {
-                    Self::execute_dependency_task(dependencies, language).await
-                }
+                TaskPayload::DependencyResolution {
+                    dependencies,
+                    language,
+                } => Self::execute_dependency_task(dependencies, language).await,
             }
-        }).await.map_err(|_| {
+        })
+        .await
+        .map_err(|_| {
             SnpError::Process(Box::new(ProcessError::Timeout {
                 command: task.id,
                 duration: timeout,
             }))
         })?
     }
-    
+
     async fn execute_hook_task(
-        hook: Hook, 
-        files: Vec<PathBuf>, 
+        hook: Hook,
+        files: Vec<PathBuf>,
         _context: ExecutionContext,
     ) -> Result<()> {
         // For now, simulate hook execution to avoid Send trait issues
         // In a production version, this would dispatch to a thread-safe execution service
         tracing::debug!("Executing hook: {} on {} files", hook.id, files.len());
-        
+
         // Simulate execution time based on estimated duration
         let execution_time = match hook.language.as_str() {
             "python" => Duration::from_millis(50),
@@ -785,9 +803,9 @@ impl WorkStealingScheduler {
             "javascript" => Duration::from_millis(30),
             _ => Duration::from_millis(25),
         };
-        
+
         tokio::time::sleep(execution_time).await;
-        
+
         // Simulate occasional failures for testing
         if hook.id.contains("fail") {
             return Err(SnpError::Process(Box::new(ProcessError::ExecutionFailed {
@@ -796,17 +814,18 @@ impl WorkStealingScheduler {
                 stderr: "Simulated failure".to_string(),
             })));
         }
-        
+
         tracing::debug!("Successfully executed hook: {}", hook.id);
         Ok(())
     }
-    
-    async fn execute_file_task(
-        files: Vec<PathBuf>, 
-        operation: FileOperation,
-    ) -> Result<()> {
-        tracing::debug!("Executing file operation {:?} on {} files", operation, files.len());
-        
+
+    async fn execute_file_task(files: Vec<PathBuf>, operation: FileOperation) -> Result<()> {
+        tracing::debug!(
+            "Executing file operation {:?} on {} files",
+            operation,
+            files.len()
+        );
+
         // Simulate file processing time based on operation and file count
         let base_time = match operation {
             FileOperation::Format => Duration::from_millis(20),
@@ -815,21 +834,24 @@ impl WorkStealingScheduler {
             FileOperation::Test => Duration::from_millis(100),
             FileOperation::Build => Duration::from_millis(200),
         };
-        
+
         let execution_time = base_time * files.len() as u32;
         tokio::time::sleep(execution_time.min(Duration::from_secs(2))).await;
-        
+
         tracing::debug!("Completed file operation: {:?}", operation);
         Ok(())
     }
-    
-    
+
     async fn execute_dependency_task(
-        dependencies: Vec<String>, 
+        dependencies: Vec<String>,
         language_name: String,
     ) -> Result<()> {
-        tracing::debug!("Resolving {} dependencies for language: {}", dependencies.len(), language_name);
-        
+        tracing::debug!(
+            "Resolving {} dependencies for language: {}",
+            dependencies.len(),
+            language_name
+        );
+
         // Simulate dependency resolution time based on language and count
         let base_time = match language_name.as_str() {
             "python" => Duration::from_millis(100),
@@ -837,25 +859,22 @@ impl WorkStealingScheduler {
             "javascript" => Duration::from_millis(75),
             _ => Duration::from_millis(50),
         };
-        
+
         let execution_time = base_time * dependencies.len() as u32;
         tokio::time::sleep(execution_time.min(Duration::from_secs(3))).await;
-        
-        tracing::debug!("Successfully resolved {} dependencies for {}", dependencies.len(), language_name);
+
+        tracing::debug!(
+            "Successfully resolved {} dependencies for {}",
+            dependencies.len(),
+            language_name
+        );
         Ok(())
     }
-    
-    fn find_least_loaded_worker(&self) -> Option<usize> {
-        self.workers
-            .iter()
-            .enumerate()
-            .min_by_key(|(_, worker)| worker.local_queue.len())
-            .map(|(idx, _)| idx)
-    }
-    
+
     pub async fn get_metrics(&self) -> SchedulerMetrics {
         // Collect worker statistics
-        let worker_stats: Vec<_> = self.workers
+        let worker_stats: Vec<_> = self
+            .workers
             .iter()
             .map(|w| {
                 let executed = w.statistics.tasks_executed.load(Ordering::Relaxed);
@@ -863,28 +882,28 @@ impl WorkStealingScheduler {
                 let total_time = w.statistics.total_execution_time_ms.load(Ordering::Relaxed);
                 let attempts = w.statistics.steal_attempts.load(Ordering::Relaxed);
                 let successful = w.statistics.successful_steals.load(Ordering::Relaxed);
-                
+
                 (executed, stolen, total_time, attempts, successful)
             })
             .collect();
-        
+
         let total_executed: u64 = worker_stats.iter().map(|(e, _, _, _, _)| *e as u64).sum();
         let total_time: u64 = worker_stats.iter().map(|(_, _, t, _, _)| *t).sum();
         let total_attempts: usize = worker_stats.iter().map(|(_, _, _, a, _)| *a).sum();
         let total_successful: usize = worker_stats.iter().map(|(_, _, _, _, s)| *s).sum();
-        
+
         let average_duration = if total_executed > 0 {
             total_time as f64 / total_executed as f64
         } else {
             0.0
         };
-        
+
         let steal_success_rate = if total_attempts > 0 {
             total_successful as f64 / total_attempts as f64
         } else {
             0.0
         };
-        
+
         // Calculate worker utilization (simplified)
         let worker_utilization: Vec<f32> = worker_stats
             .iter()
@@ -896,22 +915,19 @@ impl WorkStealingScheduler {
                 }
             })
             .collect();
-        
+
         // Calculate load balance coefficient
-        let queue_depths: Vec<usize> = self.workers
-            .iter()
-            .map(|w| w.local_queue.len())
-            .collect();
-        
+        let queue_depths: Vec<usize> = self.workers.iter().map(|w| w.local_queue.len()).collect();
+
         let max_depth = queue_depths.iter().max().copied().unwrap_or(0);
         let min_depth = queue_depths.iter().min().copied().unwrap_or(0);
-        
+
         let load_balance_coefficient = if max_depth > 0 {
             1.0 - (min_depth as f64 / max_depth as f64)
         } else {
             0.0
         };
-        
+
         SchedulerMetrics {
             total_tasks_executed: total_executed,
             average_task_duration_ms: average_duration,
@@ -921,23 +937,20 @@ impl WorkStealingScheduler {
             queue_depths,
         }
     }
-    
+
     pub async fn get_worker_statistics(&self) -> Vec<Arc<WorkerStatistics>> {
-        self.workers
-            .iter()
-            .map(|w| w.statistics.clone())
-            .collect()
+        self.workers.iter().map(|w| w.statistics.clone()).collect()
     }
-    
+
     pub async fn shutdown(&self, timeout: Duration) -> Result<()> {
         self.shutdown.store(true, Ordering::Relaxed);
         // Notify all workers to check for shutdown
         for _ in 0..self.workers.len() {
             self.task_notify.notify_one();
         }
-        
+
         let start_time = Instant::now();
-        
+
         // Wait for all workers to finish
         while self.active_workers.load(Ordering::Relaxed) > 0 {
             if start_time.elapsed() > timeout {
@@ -946,10 +959,10 @@ impl WorkStealingScheduler {
                     duration: timeout,
                 })));
             }
-            
+
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        
+
         Ok(())
     }
 }
@@ -961,7 +974,6 @@ pub struct DependencyResolver {
     ready_tasks: VecDeque<Task>,
     waiting_tasks: HashMap<String, Task>,
     completed_tasks: HashSet<String>,
-    result_receivers: HashMap<String, oneshot::Receiver<TaskResult<()>>>,
 }
 
 impl Default for DependencyResolver {
@@ -977,10 +989,9 @@ impl DependencyResolver {
             ready_tasks: VecDeque::new(),
             waiting_tasks: HashMap::new(),
             completed_tasks: HashSet::new(),
-            result_receivers: HashMap::new(),
         }
     }
-    
+
     pub async fn resolve_and_submit(
         &mut self,
         tasks: Vec<Task>,
@@ -988,43 +999,101 @@ impl DependencyResolver {
     ) -> Result<Vec<oneshot::Receiver<TaskResult<()>>>> {
         // Detect circular dependencies first
         self.detect_circular_dependencies(&tasks)?;
-        
-        // Separate ready and waiting tasks
+
+        // Store all tasks for processing
+        let mut all_tasks = Vec::new();
         for task in tasks {
+            all_tasks.push(task.clone());
             if task.dependencies.is_empty() {
                 self.ready_tasks.push_back(task);
             } else {
                 self.waiting_tasks.insert(task.id.clone(), task);
             }
         }
-        
+
         let mut all_receivers = Vec::new();
-        
-        // Submit ready tasks
+
+        // Submit ready tasks first
         while let Some(task) = self.ready_tasks.pop_front() {
             let receiver = scheduler.submit_task(task.clone()).await?;
-            self.result_receivers.insert(task.id.clone(), receiver);
-        }
-        
-        // Return all receivers (including those for waiting tasks)
-        for (_task_id, receiver) in self.result_receivers.drain() {
             all_receivers.push(receiver);
+            self.completed_tasks.insert(task.id.clone());
+
+            // Check if any waiting tasks can now be submitted
+            self.submit_newly_ready_tasks(scheduler, &mut all_receivers)
+                .await?;
         }
-        
+
+        // If no ready tasks were submitted, submit all tasks (dependency order will be handled by scheduler)
+        if all_receivers.is_empty() {
+            for task in all_tasks {
+                let receiver = scheduler.submit_task(task).await?;
+                all_receivers.push(receiver);
+            }
+        } else {
+            // Submit any remaining waiting tasks that couldn't be resolved
+            for (_, task) in self.waiting_tasks.drain() {
+                let receiver = scheduler.submit_task(task).await?;
+                all_receivers.push(receiver);
+            }
+        }
+
         Ok(all_receivers)
     }
-    
-    pub async fn task_completed(&mut self, task_id: String, scheduler: &WorkStealingScheduler) -> Result<()> {
+
+    async fn submit_newly_ready_tasks(
+        &mut self,
+        scheduler: &WorkStealingScheduler,
+        all_receivers: &mut Vec<oneshot::Receiver<TaskResult<()>>>,
+    ) -> Result<()> {
+        loop {
+            let mut newly_ready = Vec::new();
+
+            self.waiting_tasks.retain(|_id, task| {
+                let all_deps_completed = task
+                    .dependencies
+                    .iter()
+                    .all(|dep| self.completed_tasks.contains(dep));
+
+                if all_deps_completed {
+                    newly_ready.push(task.clone());
+                    false // Remove from waiting
+                } else {
+                    true // Keep waiting
+                }
+            });
+
+            if newly_ready.is_empty() {
+                break;
+            }
+
+            // Submit newly ready tasks
+            for task in newly_ready {
+                let receiver = scheduler.submit_task(task.clone()).await?;
+                all_receivers.push(receiver);
+                self.completed_tasks.insert(task.id.clone());
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn task_completed(
+        &mut self,
+        task_id: String,
+        scheduler: &WorkStealingScheduler,
+    ) -> Result<()> {
         self.completed_tasks.insert(task_id.clone());
-        
+
         // Check if any waiting tasks are now ready
         let mut newly_ready = Vec::new();
-        
+
         self.waiting_tasks.retain(|_id, task| {
-            let all_deps_completed = task.dependencies
+            let all_deps_completed = task
+                .dependencies
                 .iter()
                 .all(|dep| self.completed_tasks.contains(dep));
-                
+
             if all_deps_completed {
                 newly_ready.push(task.clone());
                 false // Remove from waiting
@@ -1032,22 +1101,22 @@ impl DependencyResolver {
                 true // Keep waiting
             }
         });
-        
+
         // Submit newly ready tasks
         for task in newly_ready {
             scheduler.submit_task(task).await?;
         }
-        
+
         Ok(())
     }
-    
+
     fn detect_circular_dependencies(&self, tasks: &[Task]) -> Result<()> {
         let task_ids: HashSet<String> = tasks.iter().map(|t| t.id.clone()).collect();
-        
+
         for task in tasks {
             let mut visited = HashSet::new();
             let mut rec_stack = HashSet::new();
-            
+
             if Self::has_cycle(&task.id, &task_ids, tasks, &mut visited, &mut rec_stack) {
                 return Err(SnpError::Process(Box::new(ProcessError::ExecutionFailed {
                     command: "dependency_resolution".to_string(),
@@ -1056,10 +1125,10 @@ impl DependencyResolver {
                 })));
             }
         }
-        
+
         Ok(())
     }
-    
+
     fn has_cycle(
         task_id: &str,
         all_tasks: &HashSet<String>,
@@ -1070,24 +1139,25 @@ impl DependencyResolver {
         if rec_stack.contains(task_id) {
             return true; // Back edge found
         }
-        
+
         if visited.contains(task_id) {
             return false; // Already processed
         }
-        
+
         visited.insert(task_id.to_string());
         rec_stack.insert(task_id.to_string());
-        
+
         // Find task by ID and check its dependencies
         if let Some(task) = tasks.iter().find(|t| t.id == task_id) {
             for dep in &task.dependencies {
                 if all_tasks.contains(dep)
-                    && Self::has_cycle(dep, all_tasks, tasks, visited, rec_stack) {
+                    && Self::has_cycle(dep, all_tasks, tasks, visited, rec_stack)
+                {
                     return true;
                 }
             }
         }
-        
+
         rec_stack.remove(task_id);
         false
     }

@@ -814,7 +814,6 @@ pub struct OptimizedBatchRegexProcessor {
 
     // Configuration
     config: BatchRegexConfig,
-
     // Future: Compilation cache for dynamic patterns
     // cache: Arc<Mutex<LruCache<String, CompiledRegexSet>>>,
 }
