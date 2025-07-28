@@ -319,6 +319,28 @@ impl FileFilter {
 
         Ok(filtered)
     }
+
+    /// Filter a list of files using arena allocation for better performance
+    /// Returns an arena-allocated slice of filtered files
+    pub fn filter_files_arena<'arena>(
+        &self,
+        arena: &'arena bumpalo::Bump,
+        files: &[PathBuf],
+    ) -> Result<&'arena [PathBuf]> {
+        use bumpalo::collections::Vec as BumpVec;
+
+        let mut arena_filtered = BumpVec::new_in(arena);
+
+        for file in files {
+            if self.matches(file)? {
+                // Clone the PathBuf and allocate it in the arena
+                let arena_path = arena.alloc(file.clone());
+                arena_filtered.push(arena_path.clone());
+            }
+        }
+
+        Ok(arena_filtered.into_bump_slice())
+    }
 }
 
 impl Default for FileFilter {

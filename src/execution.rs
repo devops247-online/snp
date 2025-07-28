@@ -2,7 +2,7 @@
 // Provides environment setup, file filtering, process execution, output collection, and result aggregation
 
 use crate::concurrency::{ConcurrencyExecutor, ResourceLimits, TaskConfig, TaskPriority};
-use crate::core::{ExecutionContext, Hook, Stage};
+use crate::core::{ArenaExecutionContext, ExecutionContext, Hook, Stage};
 use crate::error::{HookExecutionError, Result};
 use crate::language::environment::{EnvironmentConfig, EnvironmentManager, LanguageEnvironment};
 use crate::language::registry::LanguageRegistry;
@@ -13,6 +13,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
+
+// Arena allocation for performance optimization
+use bumpalo::Bump;
 
 /// Hook execution configuration
 #[derive(Debug, Clone)]
@@ -310,12 +313,22 @@ impl HookExecutionEngine {
             return Ok(result);
         }
 
-        // Filter files for this hook
-        let execution_context = ExecutionContext::new(config.stage.clone())
-            .with_files(files.to_vec())
-            .with_verbose(config.verbose);
+        // Filter files for this hook using arena allocation for better performance
+        let arena = Bump::new();
 
-        let filtered_files = execution_context.filtered_files(hook)?;
+        // Create arena-based execution context to reduce heap allocations
+        let arena_context = ArenaExecutionContext::new(
+            &arena,
+            config.stage.clone(),
+            files.to_vec(),
+            std::collections::HashMap::new(), // Empty environment for now
+        )
+        .with_verbose(config.verbose);
+
+        let filtered_files_arena = arena_context.filtered_files(hook)?;
+
+        // Convert arena slice back to Vec for compatibility with existing code
+        let filtered_files = filtered_files_arena.to_vec();
 
         // Skip if no files match and not always_run
         if filtered_files.is_empty() && !hook.always_run {
