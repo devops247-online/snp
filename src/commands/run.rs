@@ -88,6 +88,16 @@ pub async fn execute_run_command(
     config_file: &str,
     execution_config: &ExecutionConfig,
 ) -> Result<ExecutionResult> {
+    execute_run_command_with_pools(repo_path, config_file, execution_config, false).await
+}
+
+/// Execute the run command with optional resource pool support
+pub async fn execute_run_command_with_pools(
+    repo_path: &Path,
+    config_file: &str,
+    execution_config: &ExecutionConfig,
+    use_pools: bool,
+) -> Result<ExecutionResult> {
     // Initialize components
     let git_repo = GitRepository::discover_from_path(repo_path)?;
 
@@ -135,15 +145,26 @@ pub async fn execute_run_command(
     // Set working directory from repo_path
     config = config.with_working_directory(repo_path.to_path_buf());
 
-    // Execute hooks
-    tracing::debug!("Executing hooks");
-    execution_engine
-        .execute_hooks(&hooks, config)
-        .await
-        .map_err(|e| {
-            tracing::error!("Hook execution failed: {}", e);
-            e
-        })
+    // Execute hooks with or without pools
+    if use_pools {
+        tracing::debug!("Executing hooks with resource pools enabled");
+        execution_engine
+            .execute_hooks_with_pools(&hooks, config)
+            .await
+            .map_err(|e| {
+                tracing::error!("Pooled hook execution failed: {}", e);
+                e
+            })
+    } else {
+        tracing::debug!("Executing hooks (traditional mode)");
+        execution_engine
+            .execute_hooks(&hooks, config)
+            .await
+            .map_err(|e| {
+                tracing::error!("Hook execution failed: {}", e);
+                e
+            })
+    }
 }
 
 /// Execute run command on all files in the repository
@@ -152,11 +173,21 @@ pub async fn execute_run_command_all_files(
     config_file: &str,
     execution_config: &ExecutionConfig,
 ) -> Result<ExecutionResult> {
+    execute_run_command_all_files_with_pools(repo_path, config_file, execution_config, false).await
+}
+
+/// Execute run command on all files in the repository with optional pool support
+pub async fn execute_run_command_all_files_with_pools(
+    repo_path: &Path,
+    config_file: &str,
+    execution_config: &ExecutionConfig,
+    use_pools: bool,
+) -> Result<ExecutionResult> {
     let git_repo = GitRepository::discover_from_path(repo_path)?;
     let all_files = git_repo.all_files()?;
 
     let config = execution_config.clone().with_files(all_files);
-    execute_run_command(repo_path, config_file, &config).await
+    execute_run_command_with_pools(repo_path, config_file, &config, use_pools).await
 }
 
 /// Execute run command with specific files
@@ -165,8 +196,18 @@ pub async fn execute_run_command_with_files(
     config_file: &str,
     execution_config: &ExecutionConfig,
 ) -> Result<ExecutionResult> {
+    execute_run_command_with_files_with_pools(repo_path, config_file, execution_config, false).await
+}
+
+/// Execute run command with specific files with optional pool support
+pub async fn execute_run_command_with_files_with_pools(
+    repo_path: &Path,
+    config_file: &str,
+    execution_config: &ExecutionConfig,
+    use_pools: bool,
+) -> Result<ExecutionResult> {
     // Files are already set in execution_config
-    execute_run_command(repo_path, config_file, execution_config).await
+    execute_run_command_with_pools(repo_path, config_file, execution_config, use_pools).await
 }
 
 /// Execute run command for a single hook
@@ -175,6 +216,24 @@ pub async fn execute_run_command_single_hook(
     config_file: &str,
     hook_id: &str,
     execution_config: &ExecutionConfig,
+) -> Result<ExecutionResult> {
+    execute_run_command_single_hook_with_pools(
+        repo_path,
+        config_file,
+        hook_id,
+        execution_config,
+        false,
+    )
+    .await
+}
+
+/// Execute run command for a single hook with optional pool support
+pub async fn execute_run_command_single_hook_with_pools(
+    repo_path: &Path,
+    config_file: &str,
+    hook_id: &str,
+    execution_config: &ExecutionConfig,
+    use_pools: bool,
 ) -> Result<ExecutionResult> {
     // Load configuration with resolved external repository hooks and filter to single hook
     let config_path = repo_path.join(config_file);
@@ -226,15 +285,26 @@ pub async fn execute_run_command_single_hook(
     // Set working directory from repo_path
     config = config.with_working_directory(repo_path.to_path_buf());
 
-    // Execute hooks
-    tracing::debug!("Executing single hook: {}", hook_id);
-    execution_engine
-        .execute_hooks(&filtered_hooks, config)
-        .await
-        .map_err(|e| {
-            tracing::error!("Single hook execution failed: {}", e);
-            e
-        })
+    // Execute hooks with or without pools
+    if use_pools {
+        tracing::debug!("Executing single hook with pools: {}", hook_id);
+        execution_engine
+            .execute_hooks_with_pools(&filtered_hooks, config)
+            .await
+            .map_err(|e| {
+                tracing::error!("Pooled single hook execution failed: {}", e);
+                e
+            })
+    } else {
+        tracing::debug!("Executing single hook: {}", hook_id);
+        execution_engine
+            .execute_hooks(&filtered_hooks, config)
+            .await
+            .map_err(|e| {
+                tracing::error!("Single hook execution failed: {}", e);
+                e
+            })
+    }
 }
 
 /// Execute run command with git refs (from-ref to to-ref)
@@ -245,11 +315,31 @@ pub async fn execute_run_command_with_refs(
     to_ref: &str,
     execution_config: &ExecutionConfig,
 ) -> Result<ExecutionResult> {
+    execute_run_command_with_refs_with_pools(
+        repo_path,
+        config_file,
+        from_ref,
+        to_ref,
+        execution_config,
+        false,
+    )
+    .await
+}
+
+/// Execute run command with git refs with optional pool support
+pub async fn execute_run_command_with_refs_with_pools(
+    repo_path: &Path,
+    config_file: &str,
+    from_ref: &str,
+    to_ref: &str,
+    execution_config: &ExecutionConfig,
+    use_pools: bool,
+) -> Result<ExecutionResult> {
     let git_repo = GitRepository::discover_from_path(repo_path)?;
     let changed_files = git_repo.changed_files(from_ref, to_ref)?;
 
     let config = execution_config.clone().with_files(changed_files);
-    execute_run_command(repo_path, config_file, &config).await
+    execute_run_command_with_pools(repo_path, config_file, &config, use_pools).await
 }
 
 /// Filter files for a specific hook based on its patterns

@@ -23,8 +23,12 @@ pub mod logging;
 pub mod migration;
 pub mod negative_cache;
 pub mod output;
+pub mod pooled_git;
+pub mod pooled_language;
 pub mod process;
 pub mod regex_processor;
+pub mod resource_pool;
+pub mod resource_pool_manager;
 pub mod storage;
 pub mod user_output;
 pub mod validation;
@@ -93,12 +97,26 @@ pub use output::{
     ProgressReporter, ProgressState, ResourceUsageMetrics, ResultFormatter, StdoutWriter,
     TapFormatter, TeamCityFormatter, TerminalProgressRenderer, ThroughputMetrics, VerbosityLevel,
 };
+pub use pooled_git::{
+    GitPoolConfig, PooledGitError, PooledGitRepository, PooledGitStats, RepositoryState,
+};
+pub use pooled_language::{
+    DependencyState, LanguagePoolConfig, PooledLanguageEnvironment, PooledLanguageError,
+    PooledLanguageStats,
+};
 pub use process::{
     OutputHandler, ProcessConfig, ProcessEnvironment, ProcessManager, ProcessResult,
 };
 pub use regex_processor::{
     BatchRegexProcessor, CompiledRegex, MatchMatrix, PatternAnalysis, PatternAnalyzer,
     PatternIssue, PerformanceClass, RegexConfig, RegexError, RegexProcessor, SecurityWarning,
+};
+pub use resource_pool::{
+    PoolConfig, PoolError, PoolGuard, PoolMaintenance, PoolStats, Poolable, PooledResource,
+    PooledResourceMetadata, ResourcePool,
+};
+pub use resource_pool_manager::{
+    MaintenanceResults, ResourcePoolManager, ResourcePoolManagerConfig, ResourcePoolStats,
 };
 pub use storage::{ConfigInfo, EnvironmentInfo as StorageEnvironmentInfo, RepositoryInfo, Store};
 pub use validation::{

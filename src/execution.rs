@@ -3,11 +3,12 @@
 
 use crate::concurrency::{ConcurrencyExecutor, ResourceLimits, TaskConfig, TaskPriority};
 use crate::core::{ArenaExecutionContext, ExecutionContext, Hook, Stage};
-use crate::error::{HookExecutionError, Result};
+use crate::error::{HookExecutionError, Result, SnpError};
 use crate::file_change_detector::{FileChangeDetector, FileChangeDetectorConfig};
 use crate::language::environment::{EnvironmentConfig, EnvironmentManager, LanguageEnvironment};
 use crate::language::registry::LanguageRegistry;
 use crate::process::ProcessManager;
+use crate::resource_pool_manager::{ResourcePoolManager, ResourcePoolManagerConfig};
 use crate::storage::Store;
 use futures::future::BoxFuture;
 use std::collections::HashMap;
@@ -272,6 +273,8 @@ pub struct HookExecutionEngine {
     hook_cache: Arc<Mutex<HashMap<String, HookCacheEntry>>>,
     environment_cache: Arc<Mutex<HashMap<String, EnvironmentCacheEntry>>>,
     file_change_detector: Arc<Mutex<Option<Arc<FileChangeDetector>>>>,
+    /// Resource pool manager for efficient resource reuse
+    resource_pool_manager: Arc<tokio::sync::Mutex<ResourcePoolManager>>,
 }
 
 impl HookExecutionEngine {
@@ -296,6 +299,35 @@ impl HookExecutionEngine {
             resource_limits,
         ));
 
+        // Initialize resource pool manager
+        let pool_config = ResourcePoolManagerConfig {
+            cache_directory: storage.cache_directory().join("resource-pools"),
+            ..Default::default()
+        };
+
+        // Create resource pool manager asynchronously
+        // For now, we'll create a placeholder and initialize it lazily
+        let resource_pool_manager = Arc::new(tokio::sync::Mutex::new(
+            // This is a temporary solution - in production we'd want proper async initialization
+            futures::executor::block_on(async {
+                ResourcePoolManager::new(pool_config, Arc::clone(&storage))
+                    .await
+                    .unwrap_or_else(|e| {
+                        tracing::error!("Failed to initialize resource pool manager: {}", e);
+                        // Create a basic manager with disabled health checks
+                        let basic_config = ResourcePoolManagerConfig {
+                            enable_health_checks: false,
+                            cache_directory: storage.cache_directory().join("resource-pools"),
+                            ..Default::default()
+                        };
+                        futures::executor::block_on(async {
+                            ResourcePoolManager::new(basic_config, Arc::clone(&storage)).await
+                        })
+                        .unwrap()
+                    })
+            }),
+        ));
+
         Self {
             process_manager,
             storage,
@@ -305,6 +337,7 @@ impl HookExecutionEngine {
             hook_cache: Arc::new(Mutex::new(HashMap::new())),
             environment_cache: Arc::new(Mutex::new(HashMap::new())),
             file_change_detector: Arc::new(Mutex::new(None)),
+            resource_pool_manager,
         }
     }
 
@@ -1136,6 +1169,356 @@ impl HookExecutionEngine {
         Ok(hook_result)
     }
 
+    /// Execute hooks using resource pools for better performance
+    pub async fn execute_hooks_with_pools(
+        &mut self,
+        hooks: &[Hook],
+        config: ExecutionConfig,
+    ) -> Result<ExecutionResult> {
+        tracing::debug!("Starting pooled execution of {} hooks", hooks.len());
+
+        // Get resource pool manager
+        let mut pool_manager = self.resource_pool_manager.lock().await;
+
+        // Group hooks by language and dependencies for optimal pool usage
+        let mut grouped_hooks = std::collections::HashMap::new();
+
+        for hook in hooks {
+            let language = if hook.language.is_empty() {
+                "system".to_string()
+            } else {
+                hook.language.clone()
+            };
+
+            // Create a key that includes both language and major dependencies
+            // This allows us to reuse environments across hooks with similar setups
+            let dependencies = self.extract_hook_dependencies(hook);
+            let group_key = format!("{}:{}", language, self.hash_dependencies(&dependencies));
+
+            grouped_hooks
+                .entry(group_key)
+                .or_insert_with(Vec::new)
+                .push((hook, dependencies));
+        }
+
+        // Pre-warm pools for the languages and dependency combinations we'll need
+        let mut execution_contexts = std::collections::HashMap::new();
+
+        for (group_key, hook_group) in &grouped_hooks {
+            let (language, _) = group_key.split_once(':').unwrap_or(("system", ""));
+
+            // Get language pool for this group
+            let language_pool = pool_manager.get_language_pool(language, None).await;
+
+            // For Git-based hooks, also get a Git pool
+            let git_pool = if hook_group
+                .iter()
+                .any(|(hook, _)| self.hook_needs_git_repo(hook))
+            {
+                Some(
+                    pool_manager
+                        .get_git_pool(&crate::pooled_git::GitPoolConfig::default())
+                        .await,
+                )
+            } else {
+                None
+            };
+
+            execution_contexts.insert(group_key.clone(), (language_pool, git_pool));
+        }
+
+        drop(pool_manager); // Release the lock early
+
+        // Execute hooks using the pooled resources
+        let mut results = Vec::new();
+        let mut successful_hooks = 0;
+        let mut failed_hooks = 0;
+
+        for (group_key, hook_group) in grouped_hooks {
+            let (language_pool, git_pool) = execution_contexts.get(&group_key).unwrap();
+
+            tracing::debug!(
+                "Executing {} hooks in group: {}",
+                hook_group.len(),
+                group_key
+            );
+
+            // Acquire pooled language environment
+            let mut lang_guard = language_pool.acquire().await.map_err(|e| {
+                SnpError::HookExecution(Box::new(
+                    crate::error::HookExecutionError::EnvironmentSetupFailed {
+                        language: group_key.split(':').next().unwrap_or("unknown").to_string(),
+                        hook_id: "pool_acquisition".to_string(),
+                        message: format!("Failed to acquire language environment from pool: {e}"),
+                        suggestion: Some(
+                            "Check pool configuration and resource limits".to_string(),
+                        ),
+                    },
+                ))
+            })?;
+
+            // Setup the environment for the first hook's dependencies (they should be similar in the group)
+            if let Some((_, ref dependencies)) = hook_group.first() {
+                lang_guard
+                    .resource_mut()
+                    .setup_for_dependencies(dependencies)
+                    .await
+                    .map_err(|e| {
+                        SnpError::HookExecution(Box::new(
+                            crate::error::HookExecutionError::EnvironmentSetupFailed {
+                                language: group_key
+                                    .split(':')
+                                    .next()
+                                    .unwrap_or("unknown")
+                                    .to_string(),
+                                hook_id: "dependency_setup".to_string(),
+                                message: format!("Failed to setup dependencies: {e}"),
+                                suggestion: Some(
+                                    "Check dependency specifications and network connectivity"
+                                        .to_string(),
+                                ),
+                            },
+                        ))
+                    })?;
+            }
+
+            // Acquire Git repository if needed
+            let git_guard = if let Some(ref git_pool) = git_pool {
+                Some(git_pool.acquire().await.map_err(|e| {
+                    SnpError::HookExecution(Box::new(
+                        crate::error::HookExecutionError::EnvironmentSetupFailed {
+                            language: "git".to_string(),
+                            hook_id: "git_pool_acquisition".to_string(),
+                            message: format!("Failed to acquire Git repository from pool: {e}"),
+                            suggestion: Some(
+                                "Check Git pool configuration and available resources".to_string(),
+                            ),
+                        },
+                    ))
+                })?)
+            } else {
+                None
+            };
+
+            // Execute each hook in the group using the pooled resources
+            for (hook, _) in hook_group {
+                let hook_result = Self::execute_single_hook_with_pools_static(
+                    self,
+                    hook,
+                    &config,
+                    &lang_guard,
+                    &git_guard,
+                )
+                .await;
+
+                match hook_result {
+                    Ok(result) => {
+                        if result.success {
+                            successful_hooks += 1;
+                        } else {
+                            failed_hooks += 1;
+                        }
+                        results.push(result);
+                    }
+                    Err(e) => {
+                        failed_hooks += 1;
+                        // Create a failed result
+                        results.push(crate::execution::HookExecutionResult {
+                            hook_id: hook.id.clone(),
+                            success: false,
+                            skipped: false,
+                            skip_reason: None,
+                            exit_code: Some(1),
+                            duration: std::time::Duration::from_millis(0),
+                            files_processed: Vec::new(),
+                            files_modified: Vec::new(),
+                            stdout: String::new(),
+                            stderr: format!("Pool execution failed: {e}"),
+                            error: Some(HookExecutionError::EnvironmentSetupFailed {
+                                language: "pool".to_string(),
+                                hook_id: hook.id.clone(),
+                                message: format!("Pool execution failed: {e}"),
+                                suggestion: Some(
+                                    "Check pool configuration and resource limits".to_string(),
+                                ),
+                            }),
+                        });
+                    }
+                }
+            }
+
+            // Resources are automatically returned to pools when guards are dropped
+            tracing::debug!(
+                "Completed execution group: {} (dropping pooled resources)",
+                group_key
+            );
+        }
+
+        tracing::info!(
+            "Pooled execution completed: {} successful, {} failed",
+            successful_hooks,
+            failed_hooks
+        );
+
+        // Separate results into passed and failed
+        let mut hooks_passed = Vec::new();
+        let mut hooks_failed = Vec::new();
+
+        for result in results {
+            if result.success {
+                hooks_passed.push(result);
+            } else {
+                hooks_failed.push(result);
+            }
+        }
+
+        Ok(ExecutionResult {
+            success: failed_hooks == 0,
+            hooks_executed: successful_hooks + failed_hooks,
+            hooks_passed,
+            hooks_failed,
+            hooks_skipped: Vec::new(), // No skipped hooks in pooled execution for now
+            total_duration: std::time::Duration::from_millis(0), // Will be calculated properly
+            files_modified: Vec::new(), // Would need to collect from individual results
+        })
+    }
+
+    /// Execute a single hook using pooled resources
+    async fn execute_single_hook_with_pools_static(
+        engine: &mut HookExecutionEngine,
+        hook: &Hook,
+        config: &ExecutionConfig,
+        lang_guard: &crate::resource_pool::PoolGuard<
+            crate::pooled_language::PooledLanguageEnvironment,
+        >,
+        git_guard: &Option<crate::resource_pool::PoolGuard<crate::pooled_git::PooledGitRepository>>,
+    ) -> Result<crate::execution::HookExecutionResult> {
+        let start_time = std::time::Instant::now();
+
+        tracing::debug!("Executing hook '{}' with pooled resources", hook.id);
+
+        // Get the language environment from the pool
+        let _language_env = lang_guard.resource().language_environment();
+
+        // For Git-based hooks, checkout the appropriate repository state
+        if let Some(_git_guard) = git_guard {
+            if let Some(repo_url) = engine.extract_repo_url_from_hook(hook) {
+                // This would normally checkout the repo, but for now we'll just log it
+                tracing::debug!(
+                    "Would checkout repository {} for hook {}",
+                    repo_url,
+                    hook.id
+                );
+            }
+        }
+
+        // Execute the hook using the pooled environment
+        // For now, we'll simulate execution and delegate to the regular execution path
+        // In a full implementation, this would use the pooled language environment directly
+        let files = &config.files; // Use the files from the config
+        let result = engine.execute_single_hook(hook, files, config).await?;
+
+        let duration = start_time.elapsed();
+        tracing::debug!("Hook '{}' executed with pools in {:?}", hook.id, duration);
+
+        Ok(result)
+    }
+
+    /// Extract dependencies from a hook configuration
+    fn extract_hook_dependencies(&self, hook: &Hook) -> Vec<String> {
+        // Extract dependencies from hook metadata
+        // This is a simplified implementation - in practice, this would parse
+        // language-specific dependency specifications from the hook configuration
+
+        let mut dependencies = Vec::new();
+
+        // Check for common dependency patterns in hook arguments or additional dependencies
+        dependencies.extend(hook.additional_dependencies.clone());
+
+        // For specific languages, we might extract dependencies from other sources
+        match hook.language.as_str() {
+            "python" => {
+                // Could parse requirements.txt, setup.py, pyproject.toml etc.
+                // For now, just use additional_dependencies
+            }
+            "node" | "nodejs" => {
+                // Could parse package.json
+                // For now, just use additional_dependencies
+            }
+            "rust" => {
+                // Could parse Cargo.toml
+                // For now, just use additional_dependencies
+            }
+            _ => {
+                // System or other language - minimal dependencies
+            }
+        }
+
+        dependencies
+    }
+
+    /// Hash dependencies for grouping similar environments
+    fn hash_dependencies(&self, dependencies: &[String]) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+
+        // Sort dependencies for consistent hashing
+        let mut sorted_deps = dependencies.to_vec();
+        sorted_deps.sort();
+
+        for dep in &sorted_deps {
+            dep.hash(&mut hasher);
+        }
+
+        hasher.finish()
+    }
+
+    /// Check if a hook needs a Git repository
+    fn hook_needs_git_repo(&self, hook: &Hook) -> bool {
+        // Check if this hook operates on Git repositories
+        // This could be based on:
+        // 1. Hook type (some hooks inherently need Git access)
+        // 2. Hook configuration (explicit Git operations)
+        // 3. Language type (some languages might need repo context)
+
+        // For now, we'll assume Git-based hooks are those that:
+        // - Have entry referencing git or repo operations
+        // - Are specific hook types that need Git access
+        // - Or explicitly request Git access via arguments
+
+        hook.entry.contains("git")
+            || hook
+                .args
+                .iter()
+                .any(|arg| arg.contains("git") || arg.contains("repo"))
+            || hook
+                .types
+                .iter()
+                .any(|t| matches!(t.as_str(), "commit-msg" | "pre-push"))
+    }
+
+    /// Extract repository URL from hook configuration
+    fn extract_repo_url_from_hook(&self, hook: &Hook) -> Option<String> {
+        // For now, we'll extract repo URL from hook entry or arguments
+        // In practice, this would come from the repository configuration
+        if hook.entry.starts_with("https://") || hook.entry.starts_with("git@") {
+            Some(hook.entry.clone())
+        } else {
+            hook.args
+                .iter()
+                .find(|arg| arg.starts_with("https://") || arg.starts_with("git@"))
+                .cloned()
+        }
+    }
+
+    /// Get resource pool statistics
+    pub async fn get_resource_pool_stats(&self) -> crate::resource_pool_manager::ResourcePoolStats {
+        let pool_manager = self.resource_pool_manager.lock().await;
+        pool_manager.get_pool_stats().await
+    }
+
     /// Apply incremental file change detection to filter files
     async fn apply_incremental_detection(
         &self,
@@ -1197,6 +1580,21 @@ impl HookExecutionEngine {
             resource_limits,
         ));
 
+        // Create a dummy resource pool manager for tests
+        let pool_config = ResourcePoolManagerConfig {
+            enable_health_checks: false,
+            cache_directory: storage.cache_directory().join("resource-pools"),
+            ..Default::default()
+        };
+
+        let resource_pool_manager = Arc::new(tokio::sync::Mutex::new(futures::executor::block_on(
+            async {
+                ResourcePoolManager::new(pool_config, Arc::clone(&storage))
+                    .await
+                    .unwrap()
+            },
+        )));
+
         Self {
             process_manager,
             storage,
@@ -1206,6 +1604,7 @@ impl HookExecutionEngine {
             hook_cache: Arc::new(Mutex::new(HashMap::new())),
             environment_cache: Arc::new(Mutex::new(HashMap::new())),
             file_change_detector: Arc::new(Mutex::new(None)),
+            resource_pool_manager,
         }
     }
 }
