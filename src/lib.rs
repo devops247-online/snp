@@ -86,7 +86,9 @@ pub use language::{
 };
 pub use lock_free_cache::{CacheStats, LockFreeCache};
 pub use lock_free_scheduler::{
-    LoadBalanceMetrics, LockFreeTaskScheduler, ScheduledTask, SchedulerStats, WorkerState,
+    DependencyResolver as TaskDependencyResolver, FileOperation, LoadBalanceMetrics, LockFreeTaskScheduler, ScheduledTask, 
+    SchedulerConfig, SchedulerMetrics, SchedulerStats, Task, TaskPayload, WorkerState, 
+    WorkerStatistics, WorkStealingScheduler,
 };
 pub use logging::{ColorConfig, LogConfig, LogFormat};
 pub use migration::{
