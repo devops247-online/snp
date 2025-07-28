@@ -201,6 +201,14 @@ harness = false
 name = "arena_benchmark"
 harness = false
 
+[[bench]]
+name = "cache_performance_benchmark"
+harness = false
+
+[[bench]]
+name = "cache_effectiveness_benchmark"
+harness = false
+
 # Cargo-release configuration
 [package.metadata.release]
 # Enable all release steps

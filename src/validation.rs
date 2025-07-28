@@ -1,10 +1,11 @@
 // Schema validation for SNP configuration files
 use crate::config::{Config, Hook, Repository};
+use crate::enhanced_regex_processor::EnhancedRegexProcessor;
 use crate::error::{ConfigError, Result, SnpError};
 use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use once_cell::sync::Lazy;
-use regex::Regex;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Schema validation configuration
@@ -205,7 +206,7 @@ pub struct SchemaValidator {
     supported_languages: HashSet<String>,
     supported_stages: HashSet<String>,
     hook_type_validators: HashMap<String, Box<dyn HookValidator>>,
-    regex_cache: HashMap<String, Regex>,
+    regex_processor: Arc<EnhancedRegexProcessor>,
 }
 
 impl SchemaValidator {
@@ -215,7 +216,7 @@ impl SchemaValidator {
             supported_languages: get_supported_languages(),
             supported_stages: get_supported_stages(),
             hook_type_validators: HashMap::new(),
-            regex_cache: HashMap::new(),
+            regex_processor: Arc::new(EnhancedRegexProcessor::new()),
         }
     }
 
@@ -644,23 +645,50 @@ impl SchemaValidator {
         result
     }
 
-    fn compile_regex(&mut self, pattern: &str) -> Result<()> {
-        if self.regex_cache.contains_key(pattern) {
-            return Ok(());
-        }
+    fn compile_regex(&self, pattern: &str) -> Result<()> {
+        // Check if we're in async context and handle appropriately
+        if tokio::runtime::Handle::try_current().is_ok() {
+            // We're in async context - use a blocking task to compile
+            let processor = self.regex_processor.clone();
+            let pattern_clone = pattern.to_string();
 
-        match Regex::new(pattern) {
-            Ok(regex) => {
-                self.regex_cache.insert(pattern.to_string(), regex);
-                Ok(())
+            let result = std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async { processor.compile(&pattern_clone).await })
+            })
+            .join()
+            .map_err(|_| {
+                SnpError::Config(Box::new(ConfigError::InvalidRegex {
+                    pattern: pattern.to_string(),
+                    field: "pattern".to_string(),
+                    error: "Failed to join compilation thread".to_string(),
+                    file_path: None,
+                    line: None,
+                }))
+            })?;
+
+            match result {
+                Ok(_) => Ok(()),
+                Err(e) => Err(SnpError::Config(Box::new(ConfigError::InvalidRegex {
+                    pattern: pattern.to_string(),
+                    field: "pattern".to_string(),
+                    error: e.to_string(),
+                    file_path: None,
+                    line: None,
+                }))),
             }
-            Err(e) => Err(SnpError::Config(Box::new(ConfigError::InvalidRegex {
-                pattern: pattern.to_string(),
-                field: "pattern".to_string(),
-                error: e.to_string(),
-                file_path: None,
-                line: None,
-            }))),
+        } else {
+            // We're not in async context - use the sync version
+            match self.regex_processor.compile_regex(pattern) {
+                Ok(_) => Ok(()),
+                Err(e) => Err(SnpError::Config(Box::new(ConfigError::InvalidRegex {
+                    pattern: pattern.to_string(),
+                    field: "pattern".to_string(),
+                    error: e.to_string(),
+                    file_path: None,
+                    line: None,
+                }))),
+            }
         }
     }
 

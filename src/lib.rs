@@ -1,12 +1,14 @@
 // SNP (Shell Not Pass) - Library module
 // This file contains the core library functionality
 
+pub mod cache;
 pub mod classification;
 pub mod cli;
 pub mod commands;
 pub mod concurrency;
 pub mod config;
 pub mod core;
+pub mod enhanced_regex_processor;
 pub mod error;
 pub mod execution;
 pub mod file_change_detector;
@@ -26,6 +28,7 @@ pub mod user_output;
 pub mod validation;
 
 // Re-export main types for easier access
+pub use cache::{CacheConfig, CacheMetrics, CacheTier, MultiTierCache};
 pub use classification::{
     ClassificationError, DetectionMethod, FileClassification, FileClassifier, FileType,
     LanguageDefinitions, LanguageDetection,
@@ -36,6 +39,7 @@ pub use concurrency::{
 };
 pub use config::{Config, IncrementalConfig};
 pub use core::{ExecutionContext, Hook, Repository, Stage};
+pub use enhanced_regex_processor::{CachePerformanceReport, EnhancedRegexProcessor};
 pub use error::{
     exit_codes, CliError, ConfigError, GitError, HookChainingError, HookExecutionError, LockError,
     ProcessError, Result, SnpError, StorageError,
