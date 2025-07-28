@@ -86,9 +86,9 @@ pub use language::{
 };
 pub use lock_free_cache::{CacheStats, LockFreeCache};
 pub use lock_free_scheduler::{
-    DependencyResolver as TaskDependencyResolver, FileOperation, LoadBalanceMetrics, LockFreeTaskScheduler, ScheduledTask, 
-    SchedulerConfig, SchedulerMetrics, SchedulerStats, Task, TaskPayload, WorkerState, 
-    WorkerStatistics, WorkStealingScheduler,
+    DependencyResolver as TaskDependencyResolver, FileOperation, LoadBalanceMetrics,
+    LockFreeTaskScheduler, ScheduledTask, SchedulerConfig, SchedulerMetrics, SchedulerStats, Task,
+    TaskPayload, WorkStealingScheduler, WorkerState, WorkerStatistics,
 };
 pub use logging::{ColorConfig, LogConfig, LogFormat};
 pub use migration::{
@@ -117,8 +117,9 @@ pub use process::{
     OutputHandler, ProcessConfig, ProcessEnvironment, ProcessManager, ProcessResult,
 };
 pub use regex_processor::{
-    BatchRegexProcessor, CompiledRegex, MatchMatrix, PatternAnalysis, PatternAnalyzer,
-    PatternIssue, PerformanceClass, RegexConfig, RegexError, RegexProcessor, SecurityWarning,
+    BatchRegexConfig, BatchRegexProcessor, CompiledRegex, MatchMatrix,
+    OptimizedBatchRegexProcessor, PatternAnalysis, PatternAnalyzer, PatternIssue, PerformanceClass,
+    RegexConfig, RegexError, RegexMatch, RegexProcessor, SecurityWarning,
 };
 pub use resource_pool::{
     PoolConfig, PoolError, PoolGuard, PoolMaintenance, PoolStats, Poolable, PooledResource,

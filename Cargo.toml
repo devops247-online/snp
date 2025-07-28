@@ -213,6 +213,10 @@ harness = false
 name = "cache_effectiveness_benchmark"
 harness = false
 
+[[bench]]
+name = "regex_batch_benchmark"
+harness = false
+
 # Cargo-release configuration
 [package.metadata.release]
 # Enable all release steps

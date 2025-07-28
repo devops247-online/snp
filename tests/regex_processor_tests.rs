@@ -1,6 +1,7 @@
 // Comprehensive regex processing tests for SNP
 use snp::regex_processor::{
-    BatchRegexProcessor, PatternAnalyzer, PerformanceClass, RegexConfig, RegexProcessor,
+    BatchRegexConfig, BatchRegexProcessor, OptimizedBatchRegexProcessor, PatternAnalyzer,
+    PerformanceClass, RegexConfig, RegexProcessor,
 };
 use std::time::Instant;
 
@@ -612,5 +613,318 @@ mod benchmark_tests {
             avg_time_per_hit < 5_000.0,
             "Average cache hit time {avg_time_per_hit} ns should be < 5μs"
         );
+    }
+}
+
+// Tests for the new OptimizedBatchRegexProcessor
+#[cfg(test)]
+mod optimized_batch_tests {
+    use super::*;
+
+    #[test]
+    fn test_optimized_batch_regex_processor_creation() {
+        let patterns = vec![
+            ("python".to_string(), r"\.py$".to_string()),
+            ("rust".to_string(), r"\.rs$".to_string()),
+            ("javascript".to_string(), r"\.(js|ts)$".to_string()),
+        ];
+
+        let processor = OptimizedBatchRegexProcessor::new(patterns);
+        assert!(processor.is_ok(), "Should create processor successfully");
+
+        let processor = processor.unwrap();
+
+        // Test basic functionality
+        assert!(
+            processor.any_matches("test.py"),
+            "Should match Python files"
+        );
+        assert!(processor.any_matches("main.rs"), "Should match Rust files");
+        assert!(
+            processor.any_matches("app.js"),
+            "Should match JavaScript files"
+        );
+        assert!(
+            processor.any_matches("app.ts"),
+            "Should match TypeScript files"
+        );
+        assert!(
+            !processor.any_matches("README.md"),
+            "Should not match markdown files"
+        );
+    }
+
+    #[test]
+    fn test_match_all_functionality() {
+        let patterns = vec![
+            ("python".to_string(), r"\.py$".to_string()),
+            ("test".to_string(), r"test_.*\.py$".to_string()),
+            ("src".to_string(), r"src/.*\.py$".to_string()),
+        ];
+
+        let processor = OptimizedBatchRegexProcessor::new(patterns).unwrap();
+
+        // Test single match
+        let matches = processor.match_all("app.py");
+        assert_eq!(matches.len(), 1, "Should find one match");
+        assert_eq!(matches[0].pattern_name, "python");
+        assert_eq!(matches[0].match_text, "app.py");
+
+        // Test multiple matches
+        let matches = processor.match_all("test_module.py");
+        assert_eq!(matches.len(), 2, "Should find two matches"); // python and test patterns
+        let pattern_names: Vec<&str> = matches.iter().map(|m| m.pattern_name.as_str()).collect();
+        assert!(pattern_names.contains(&"python"));
+        assert!(pattern_names.contains(&"test"));
+
+        // Test overlapping matches
+        let matches = processor.match_all("src/test_utils.py");
+        assert_eq!(matches.len(), 3, "Should find three matches"); // python, test, and src patterns
+        let pattern_names: Vec<&str> = matches.iter().map(|m| m.pattern_name.as_str()).collect();
+        assert!(pattern_names.contains(&"python"));
+        assert!(pattern_names.contains(&"test"));
+        assert!(pattern_names.contains(&"src"));
+
+        // Test no matches
+        let matches = processor.match_all("README.md");
+        assert_eq!(matches.len(), 0, "Should find no matches");
+    }
+
+    #[test]
+    fn test_with_config() {
+        let patterns = vec![
+            ("case_sensitive".to_string(), r"Test\.py$".to_string()),
+            ("case_insensitive".to_string(), r"(?i)test\.rs$".to_string()),
+        ];
+
+        let config = BatchRegexConfig {
+            enable_batch_processing: true,
+            min_patterns_for_batch: 1,
+            cache_size: 100,
+            compile_timeout: std::time::Duration::from_secs(5),
+            enable_optimization: true,
+        };
+
+        let processor = OptimizedBatchRegexProcessor::with_config(patterns, config);
+        assert!(processor.is_ok(), "Should create processor with config");
+
+        let processor = processor.unwrap();
+
+        // Test case sensitivity
+        assert!(processor.any_matches("Test.py"), "Should match exact case");
+        assert!(
+            !processor.any_matches("test.py"),
+            "Should not match different case without (?i)"
+        );
+
+        // Test case insensitive pattern
+        assert!(processor.any_matches("test.rs"), "Should match lowercase");
+        assert!(
+            processor.any_matches("Test.rs"),
+            "Should match uppercase due to (?i)"
+        );
+    }
+
+    #[test]
+    fn test_error_handling() {
+        // Test invalid regex patterns
+        let invalid_patterns = vec![("invalid".to_string(), r"[unclosed".to_string())];
+
+        let processor = OptimizedBatchRegexProcessor::new(invalid_patterns);
+        assert!(processor.is_err(), "Should fail with invalid pattern");
+
+        // Test empty patterns
+        let empty_patterns = vec![];
+        let processor = OptimizedBatchRegexProcessor::new(empty_patterns);
+        assert!(processor.is_ok(), "Should handle empty patterns gracefully");
+    }
+
+    #[test]
+    fn test_regex_match_struct() {
+        let patterns = vec![("test".to_string(), r"test_(\w+)\.py$".to_string())];
+
+        let processor = OptimizedBatchRegexProcessor::new(patterns).unwrap();
+        let matches = processor.match_all("test_module.py");
+
+        assert_eq!(matches.len(), 1);
+        let m = &matches[0];
+        assert_eq!(m.pattern_name, "test");
+        assert_eq!(m.match_text, "test_module.py"); // Full text for file matching
+        assert_eq!(m.start, 0);
+        assert_eq!(m.end, "test_module.py".len());
+    }
+
+    #[test]
+    fn test_file_filtering_integration() {
+        // Simulate real-world file filtering scenario
+        let patterns = vec![
+            ("files".to_string(), r"\.(py|rs|js)$".to_string()),
+            ("exclude".to_string(), r"__pycache__/".to_string()),
+            ("tests".to_string(), r"tests?/.*\.py$".to_string()),
+        ];
+
+        let processor = OptimizedBatchRegexProcessor::new(patterns).unwrap();
+
+        let test_files = vec![
+            "src/main.py",
+            "src/__pycache__/main.pyc",
+            "tests/test_main.py",
+            "lib.rs",
+            "app.js",
+            "README.md",
+        ];
+
+        for file in test_files {
+            let matches = processor.match_all(file);
+
+            match file {
+                "src/main.py" => {
+                    assert_eq!(matches.len(), 1);
+                    assert_eq!(matches[0].pattern_name, "files");
+                }
+                "src/__pycache__/main.pyc" => {
+                    assert_eq!(matches.len(), 1);
+                    assert_eq!(matches[0].pattern_name, "exclude");
+                }
+                "tests/test_main.py" => {
+                    assert_eq!(matches.len(), 2); // files and tests patterns
+                    let pattern_names: Vec<&str> =
+                        matches.iter().map(|m| m.pattern_name.as_str()).collect();
+                    assert!(pattern_names.contains(&"files"));
+                    assert!(pattern_names.contains(&"tests"));
+                }
+                "lib.rs" => {
+                    assert_eq!(matches.len(), 1);
+                    assert_eq!(matches[0].pattern_name, "files");
+                }
+                "app.js" => {
+                    assert_eq!(matches.len(), 1);
+                    assert_eq!(matches[0].pattern_name, "files");
+                }
+                "README.md" => {
+                    assert_eq!(matches.len(), 0);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod performance_comparison_tests {
+    use super::*;
+
+    #[test]
+    fn test_batch_vs_individual_performance() {
+        let patterns = vec![
+            ("python".to_string(), r"\.py$".to_string()),
+            ("rust".to_string(), r"\.rs$".to_string()),
+            ("javascript".to_string(), r"\.(js|ts|jsx|tsx)$".to_string()),
+            ("java".to_string(), r"\.java$".to_string()),
+            ("cpp".to_string(), r"\.(cpp|hpp|cc|h)$".to_string()),
+            ("go".to_string(), r"\.go$".to_string()),
+            ("ruby".to_string(), r"\.rb$".to_string()),
+            ("php".to_string(), r"\.php$".to_string()),
+            ("swift".to_string(), r"\.swift$".to_string()),
+            ("kotlin".to_string(), r"\.kt$".to_string()),
+        ];
+
+        let test_files = generate_file_paths(1000);
+
+        // Test individual processing
+        let mut individual_processor = RegexProcessor::new(RegexConfig::default());
+        let start = Instant::now();
+
+        let mut individual_matches = 0;
+        for file in &test_files {
+            for (_, pattern) in &patterns {
+                if individual_processor
+                    .is_match(pattern, file)
+                    .unwrap_or(false)
+                {
+                    individual_matches += 1;
+                }
+            }
+        }
+        let individual_duration = start.elapsed();
+
+        // Test batch processing
+        let batch_processor = OptimizedBatchRegexProcessor::new(patterns.clone()).unwrap();
+        let start = Instant::now();
+
+        let mut batch_matches = 0;
+        for file in &test_files {
+            batch_matches += batch_processor.match_all(file).len();
+        }
+        let batch_duration = start.elapsed();
+
+        // Results should be equivalent
+        assert_eq!(
+            individual_matches, batch_matches,
+            "Both methods should find same number of matches"
+        );
+
+        // Performance improvement expectation (batch should be faster for multiple patterns)
+        // This is more of a documentation test - actual performance depends on pattern complexity
+        println!("Individual processing: {individual_duration:?}");
+        println!("Batch processing: {batch_duration:?}");
+        println!(
+            "Speedup factor: {:.2}x",
+            individual_duration.as_secs_f64() / batch_duration.as_secs_f64()
+        );
+
+        // Note: We don't assert performance improvement here as it depends on many factors
+        // The benchmark tests in benches/ directory will provide more reliable metrics
+    }
+
+    #[test]
+    fn test_memory_usage_comparison() {
+        // Test that batch processing doesn't use excessive memory
+        let large_pattern_set: Vec<(String, String)> = (0..100)
+            .map(|i| (format!("pattern_{i}"), format!(r"pattern_{i}.*\.ext$")))
+            .collect();
+
+        let processor = OptimizedBatchRegexProcessor::new(large_pattern_set);
+        assert!(processor.is_ok(), "Should handle large pattern sets");
+
+        let processor = processor.unwrap();
+
+        // Test that it still works with many patterns
+        assert!(
+            !processor.any_matches("test.txt"),
+            "Should work with large pattern set"
+        );
+        assert!(
+            processor.any_matches("pattern_50_test.ext"),
+            "Should match appropriate pattern"
+        );
+    }
+
+    #[test]
+    fn test_adaptive_batching() {
+        // Test behavior with different pattern counts
+
+        // Single pattern - should still work efficiently
+        let single_pattern = vec![("test".to_string(), r"\.test$".to_string())];
+        let processor = OptimizedBatchRegexProcessor::new(single_pattern).unwrap();
+        assert!(processor.any_matches("file.test"));
+        assert!(!processor.any_matches("file.other"));
+
+        // Few patterns - should use batch processing
+        let few_patterns = vec![
+            ("test1".to_string(), r"\.test1$".to_string()),
+            ("test2".to_string(), r"\.test2$".to_string()),
+            ("test3".to_string(), r"\.test3$".to_string()),
+        ];
+        let processor = OptimizedBatchRegexProcessor::new(few_patterns).unwrap();
+        assert!(processor.any_matches("file.test2"));
+
+        // Many patterns - should still be efficient
+        let many_patterns: Vec<(String, String)> = (0..50)
+            .map(|i| (format!("ext_{i}"), format!(r"\.ext{i}$")))
+            .collect();
+        let processor = OptimizedBatchRegexProcessor::new(many_patterns).unwrap();
+        assert!(processor.any_matches("file.ext25"));
+        assert!(!processor.any_matches("file.other"));
     }
 }
