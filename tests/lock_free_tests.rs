@@ -130,10 +130,12 @@ mod lock_free_cache_tests {
         let cache = LockFreeCache::new(2);
 
         cache.insert("key1".to_string(), "value1".to_string());
+        thread::sleep(Duration::from_millis(1)); // Ensure distinct timestamps
         cache.insert("key2".to_string(), "value2".to_string());
         assert_eq!(cache.len(), 2);
 
         // Access key1 to make it more recently used
+        thread::sleep(Duration::from_millis(1)); // Ensure distinct timestamps
         cache.get(&"key1".to_string());
 
         // This should trigger eviction of key2 (LRU)

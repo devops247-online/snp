@@ -20,7 +20,7 @@ impl<V> CacheEntry<V> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_secs();
+            .as_millis() as u64;
 
         Self {
             value,
@@ -34,7 +34,7 @@ impl<V> CacheEntry<V> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_secs();
+            .as_millis() as u64;
 
         self.access_count.fetch_add(1, Ordering::Relaxed);
         self.last_accessed.store(now, Ordering::Relaxed);
@@ -233,14 +233,14 @@ where
         (self.len() as f64 / self.max_size as f64) * 100.0
     }
 
-    /// Evict entries older than the specified number of seconds
-    pub fn evict_expired(&self, max_age_seconds: u64) {
+    /// Evict entries older than the specified number of milliseconds
+    pub fn evict_expired(&self, max_age_millis: u64) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_secs();
+            .as_millis() as u64;
 
-        let cutoff = now.saturating_sub(max_age_seconds);
+        let cutoff = now.saturating_sub(max_age_millis);
 
         // Collect keys to evict
         let keys_to_evict: Vec<K> = self
@@ -339,13 +339,13 @@ mod tests {
 
         // Insert two items with enough time difference
         cache.insert("key1".to_string(), "value1".to_string());
-        thread::sleep(Duration::from_secs(1));
+        thread::sleep(Duration::from_millis(1));
         cache.insert("key2".to_string(), "value2".to_string());
         assert_eq!(cache.len(), 2);
 
         // Access key1 to make it more recently used than key2
+        thread::sleep(Duration::from_millis(1));
         cache.get(&"key1".to_string());
-        thread::sleep(Duration::from_secs(1));
 
         // Verify the cache state before eviction
         let stats_before = cache.stats();
@@ -469,11 +469,11 @@ mod tests {
         cache.insert("key1".to_string(), "value1".to_string());
         assert_eq!(cache.len(), 1);
 
-        // Sleep to ensure time passes (longer to be safe)
-        thread::sleep(Duration::from_secs(1));
+        // Sleep to ensure time passes
+        thread::sleep(Duration::from_millis(100));
 
-        // Evict entries older than 0 seconds (should evict all entries)
-        cache.evict_expired(0);
+        // Evict entries older than 50 milliseconds (should evict all entries)
+        cache.evict_expired(50);
         assert_eq!(cache.len(), 0);
 
         let stats = cache.stats();
