@@ -132,6 +132,7 @@ is-terminal = "0.4"
 fs2 = "0.4"
 notify = "8.1"
 filetime = "0.2"
+blake3 = "1.5"  # Fast cryptographic hashing for file change detection
 
 # Date and time handling
 chrono = { version = "0.4", features = ["serde"] }
@@ -146,7 +147,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 
 # Schema validation dependencies
 validator = "0.20"
-jsonschema = "0.30"
+jsonschema = "0.31"
 ahash = "0.8"
 once_cell = "1.19"
 

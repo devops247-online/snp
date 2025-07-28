@@ -829,6 +829,7 @@ mod tests {
             fail_fast: None,
             minimum_pre_commit_version: None,
             ci: None,
+            incremental: None,
         };
 
         let result = validator.validate_config(&config);
@@ -849,6 +850,7 @@ mod tests {
             fail_fast: None,
             minimum_pre_commit_version: None,
             ci: None,
+            incremental: None,
         };
 
         let invalid_result = validator.validate_config(&invalid_config);
@@ -1063,6 +1065,7 @@ mod tests {
             fail_fast: None,
             minimum_pre_commit_version: None,
             ci: None,
+            incremental: None,
         };
 
         let result = validator.validate_config(&config_with_duplicates);
@@ -1145,6 +1148,7 @@ mod tests {
             fail_fast: None,
             minimum_pre_commit_version: Some("3.0.0".to_string()),
             ci: None,
+            incremental: None,
         };
 
         let report = validator.check_compatibility(&config);
@@ -1189,6 +1193,7 @@ mod tests {
             fail_fast: None,
             minimum_pre_commit_version: None,
             ci: None,
+            incremental: None,
         };
 
         let result = validator_strict.validate_config(&config_with_meta);
