@@ -212,18 +212,17 @@ fn bench_zero_copy_commands(c: &mut Criterion) {
         Hook::new("simple", "rustc", "rust"),
         Hook::new("few_args", "cargo", "rust")
             .with_args(vec!["build".to_string(), "--release".to_string()]),
-        Hook::new("many_args", "rustfmt", "rust")
-            .with_args(vec![
-                "--check".to_string(),
-                "--edition".to_string(),
-                "2021".to_string(),
-                "--config".to_string(),
-                "hard_tabs=true".to_string(),
-                "--emit".to_string(),
-                "files".to_string(),
-                "--color".to_string(),
-                "always".to_string(),
-            ]),
+        Hook::new("many_args", "rustfmt", "rust").with_args(vec![
+            "--check".to_string(),
+            "--edition".to_string(),
+            "2021".to_string(),
+            "--config".to_string(),
+            "hard_tabs=true".to_string(),
+            "--emit".to_string(),
+            "files".to_string(),
+            "--color".to_string(),
+            "always".to_string(),
+        ]),
     ];
 
     for hook in &hooks {
@@ -249,14 +248,13 @@ fn bench_zero_copy_commands(c: &mut Criterion) {
     }
 
     // Benchmark frequent command generation (hot path simulation)
-    let hook = Hook::new("hot_path", "black", "python")
-        .with_args(vec![
-            "--check".to_string(),
-            "--diff".to_string(),
-            "--color".to_string(),
-            "--line-length".to_string(),
-            "88".to_string(),
-        ]);
+    let hook = Hook::new("hot_path", "black", "python").with_args(vec![
+        "--check".to_string(),
+        "--diff".to_string(),
+        "--color".to_string(),
+        "--line-length".to_string(),
+        "88".to_string(),
+    ]);
 
     group.bench_function("hot_path_traditional", |b| {
         b.iter(|| {
