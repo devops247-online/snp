@@ -20,6 +20,7 @@ pub mod install;
 pub mod language;
 pub mod logging;
 pub mod migration;
+pub mod negative_cache;
 pub mod output;
 pub mod process;
 pub mod regex_processor;
@@ -78,6 +79,7 @@ pub use migration::{
     MigrationRule, MigrationWarning, RepositoryMigrationResult, StructuralChange,
     StructuralChangeType, TransformationType,
 };
+pub use negative_cache::{NegativeCache, NegativeCacheConfig, NegativeCacheMetrics};
 pub use output::{
     AggregatedOutput, BufferEntry, CacheStatistics, CollectedOutput, ColorMode, ExecutionSummary,
     GitHubFormatter, HumanFormatter, JsonFormatter, JunitFormatter, OutputAggregator, OutputBuffer,

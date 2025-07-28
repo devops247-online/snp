@@ -14,6 +14,7 @@ use tokio::sync::Semaphore;
 
 use crate::enhanced_regex_processor::EnhancedRegexProcessor;
 use crate::error::{ConfigError, Result, SnpError};
+use crate::negative_cache::NegativeCache;
 
 /// File system utilities for cross-platform operations
 pub struct FileSystem;
@@ -472,6 +473,42 @@ impl FileFilter {
         Ok(filtered)
     }
 
+    /// Filter a list of files with negative caching for improved performance
+    /// Reduces expensive cache misses by quickly identifying definitely absent entries
+    pub fn filter_files_with_negative_cache(
+        &self,
+        files: &[PathBuf],
+        negative_cache: &mut NegativeCache,
+    ) -> Result<Vec<PathBuf>> {
+        let mut result = Vec::new();
+
+        for file in files {
+            let file_str = file.to_string_lossy();
+
+            // Quick negative check first - if probably absent, skip expensive matching
+            if negative_cache.probably_absent(&file_str) {
+                continue;
+            }
+
+            // Definitive negative check
+            if negative_cache.definitely_absent(&file_str) {
+                continue;
+            }
+
+            // Perform actual matching
+            match self.matches(file) {
+                Ok(true) => result.push(file.clone()),
+                Ok(false) => {
+                    // Record this as a miss in the negative cache
+                    negative_cache.record_miss(file_str.to_string());
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(result)
+    }
+
     /// Filter a list of files using arena allocation for better performance
     /// Returns an arena-allocated slice of filtered files
     pub fn filter_files_arena<'arena>(
@@ -609,6 +646,9 @@ impl FileFilter {
 
         Ok(filtered_files)
     }
+
+    // TODO: Implement async version with proper synchronization for negative cache
+    // This would require Arc<Mutex<NegativeCache>> or similar thread-safe wrapper
 }
 
 impl Default for FileFilter {
