@@ -411,8 +411,8 @@ mod tests {
     async fn test_is_match_with_caching() {
         let processor = EnhancedRegexProcessor::new();
 
-        let result1 = processor.is_match(r"\d+", "123").unwrap();
-        let result2 = processor.is_match(r"\d+", "abc").unwrap();
+        let result1 = processor.is_match_async(r"\d+", "123").await.unwrap();
+        let result2 = processor.is_match_async(r"\d+", "abc").await.unwrap();
 
         assert!(result1);
         assert!(!result2);
@@ -435,10 +435,10 @@ mod tests {
         let results = processor.batch_compile(&patterns).await.unwrap();
         assert_eq!(results.len(), 3);
 
-        // All patterns should be compiled successfully
-        for regex in results {
-            assert!(regex.is_match("test123"));
-        }
+        // Test each pattern with appropriate test strings
+        assert!(results[0].is_match("test123")); // \d+ matches digits in "test123"
+        assert!(results[1].is_match("test123")); // [a-zA-Z]+ matches letters in "test123"
+        assert!(results[2].is_match("user@example.com")); // \w+@\w+\.\w+ matches email format
     }
 
     #[tokio::test]
@@ -446,9 +446,9 @@ mod tests {
         let processor = EnhancedRegexProcessor::new();
 
         // Use the processor to generate some metrics
-        processor.is_match(r"\d+", "123").unwrap();
-        processor.is_match(r"[a-z]+", "abc").unwrap();
-        processor.is_match(r"\d+", "456").unwrap(); // Cache hit
+        processor.is_match_async(r"\d+", "123").await.unwrap();
+        processor.is_match_async(r"[a-z]+", "abc").await.unwrap();
+        processor.is_match_async(r"\d+", "456").await.unwrap(); // Cache hit
 
         let report = processor.analyze_cache_performance().await;
         assert!(report.overall_hit_rate >= 0.0);
