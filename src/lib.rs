@@ -9,6 +9,7 @@ pub mod config;
 pub mod core;
 pub mod error;
 pub mod execution;
+pub mod file_change_detector;
 pub mod file_lock;
 pub mod filesystem;
 pub mod git;
@@ -33,13 +34,14 @@ pub use concurrency::{
     BatchResult, ConcurrencyExecutor, ErrorAggregator, ResourceGuard, ResourceLimits,
     ResourceRequirements, ResourceUsage, TaskConfig, TaskPriority, TaskResult, TaskState,
 };
-pub use config::Config;
+pub use config::{Config, IncrementalConfig};
 pub use core::{ExecutionContext, Hook, Repository, Stage};
 pub use error::{
     exit_codes, CliError, ConfigError, GitError, HookChainingError, HookExecutionError, LockError,
     ProcessError, Result, SnpError, StorageError,
 };
 pub use execution::{ExecutionConfig, ExecutionResult, HookExecutionEngine, HookExecutionResult};
+pub use file_change_detector::{FileChangeDetector, FileChangeDetectorConfig};
 pub use file_lock::{
     ConfigFileLock, FileLock, FileLockManager, LockBehavior, LockConfig, LockHierarchy, LockInfo,
     LockMetrics, LockOrdering, LockStatus, LockType, StaleLockDetector, TempFileLock,

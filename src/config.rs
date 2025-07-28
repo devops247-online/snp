@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::error::{ConfigError, Result, SnpError};
+use crate::file_change_detector::FileChangeDetectorConfig;
 use crate::storage::Store;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -18,6 +19,7 @@ pub struct Config {
     pub fail_fast: Option<bool>,
     pub minimum_pre_commit_version: Option<String>,
     pub ci: Option<serde_yaml::Value>,
+    pub incremental: Option<IncrementalConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -47,6 +49,25 @@ pub struct Hook {
     pub stages: Option<Vec<String>>,
     pub verbose: Option<bool>,
     pub depends_on: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct IncrementalConfig {
+    pub enabled: Option<bool>,
+    pub cache_size: Option<usize>,
+    pub hash_large_files: Option<bool>,
+    pub watch_filesystem: Option<bool>,
+    pub force_refresh: Option<bool>,
+}
+
+impl IncrementalConfig {
+    pub fn to_detector_config(&self) -> FileChangeDetectorConfig {
+        FileChangeDetectorConfig::new()
+            .with_watch_filesystem(self.watch_filesystem.unwrap_or(true))
+            .with_cache_size(self.cache_size.unwrap_or(10000))
+            .with_hash_large_files(self.hash_large_files.unwrap_or(false))
+            .with_force_refresh(self.force_refresh.unwrap_or(false))
+    }
 }
 
 impl Config {

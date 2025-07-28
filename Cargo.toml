@@ -132,6 +132,7 @@ is-terminal = "0.4"
 fs2 = "0.4"
 notify = "8.1"
 filetime = "0.2"
+blake3 = "1.5"  # Fast cryptographic hashing for file change detection
 
 # Date and time handling
 chrono = { version = "0.4", features = ["serde"] }
