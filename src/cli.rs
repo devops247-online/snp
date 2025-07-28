@@ -111,6 +111,10 @@ pub enum Commands {
         /// Show hook dependencies and execution order
         #[arg(long)]
         show_deps: bool,
+
+        /// Enable resource pooling for improved performance
+        #[arg(long)]
+        use_pools: bool,
     },
 
     /// Install the pre-commit script
@@ -300,6 +304,7 @@ impl Cli {
                 show_diff_on_failure: _,
                 hook_stage,
                 show_deps,
+                use_pools,
             }) => {
                 // Validate run command arguments
                 if *all_files && !files.is_empty() {
@@ -364,43 +369,66 @@ impl Cli {
                         .await;
                 }
 
+                // Add pool status to output if enabled
+                if *use_pools {
+                    user_output.show_status("Resource pooling enabled for improved performance");
+                }
+
                 // Execute based on command type
                 let execution_result = if let Some(hook_id) = hook {
                     user_output.show_status(&format!("Running hook: {hook_id}"));
-                    run::execute_run_command_single_hook(
+                    run::execute_run_command_single_hook_with_pools(
                         &repo_path,
                         &self.config,
                         hook_id,
                         &execution_config,
+                        *use_pools,
                     )
                     .await?
                 } else if *all_files {
                     user_output.show_status("Running hooks on all files");
                     execution_config = execution_config.with_all_files(true);
-                    run::execute_run_command_all_files(&repo_path, &self.config, &execution_config)
-                        .await?
+                    run::execute_run_command_all_files_with_pools(
+                        &repo_path,
+                        &self.config,
+                        &execution_config,
+                        *use_pools,
+                    )
+                    .await?
                 } else if !files.is_empty() {
                     user_output
                         .show_status(&format!("Running hooks on {} specific files", files.len()));
                     let file_paths: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
                     execution_config = execution_config.with_files(file_paths);
-                    run::execute_run_command_with_files(&repo_path, &self.config, &execution_config)
-                        .await?
+                    run::execute_run_command_with_files_with_pools(
+                        &repo_path,
+                        &self.config,
+                        &execution_config,
+                        *use_pools,
+                    )
+                    .await?
                 } else if let (Some(from), Some(to)) = (from_ref, to_ref) {
                     user_output.show_status(&format!(
                         "Running hooks on files changed between {from} and {to}"
                     ));
-                    run::execute_run_command_with_refs(
+                    run::execute_run_command_with_refs_with_pools(
                         &repo_path,
                         &self.config,
                         from,
                         to,
                         &execution_config,
+                        *use_pools,
                     )
                     .await?
                 } else {
                     user_output.show_status("Running hooks on staged files");
-                    run::execute_run_command(&repo_path, &self.config, &execution_config).await?
+                    run::execute_run_command_with_pools(
+                        &repo_path,
+                        &self.config,
+                        &execution_config,
+                        *use_pools,
+                    )
+                    .await?
                 };
 
                 // Report results using user-friendly output
