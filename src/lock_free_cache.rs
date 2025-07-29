@@ -54,8 +54,6 @@ pub struct LockFreeCache<K, V> {
 
     // Configuration
     max_size: usize,
-    #[allow(dead_code)]
-    current_timestamp: AtomicU64,
 }
 
 impl<K, V> LockFreeCache<K, V>
@@ -72,7 +70,6 @@ where
             evictions: AtomicU64::new(0),
             inserts: AtomicU64::new(0),
             max_size,
-            current_timestamp: AtomicU64::new(0),
         }
     }
 

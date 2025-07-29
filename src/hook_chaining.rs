@@ -776,13 +776,143 @@ impl ConditionEvaluator {
         }
     }
 
+    /// Register a custom condition evaluator
+    pub fn register_evaluator(
+        &mut self,
+        name: String,
+        evaluator: Box<dyn CustomConditionEvaluator>,
+    ) {
+        self.evaluators.insert(name, evaluator);
+    }
+
     pub async fn evaluate(
         &mut self,
-        _condition: &ExecutionCondition,
-        _context: &ConditionContext,
+        condition: &ExecutionCondition,
+        context: &ConditionContext,
     ) -> Result<bool> {
-        // Stub implementation
-        Ok(true)
+        match condition {
+            ExecutionCondition::FileExists { path } => Ok(path.exists()),
+
+            ExecutionCondition::FileModified { path, since } => {
+                if !path.exists() {
+                    return Ok(false);
+                }
+
+                match std::fs::metadata(path) {
+                    Ok(metadata) => {
+                        if let Ok(modified) = metadata.modified() {
+                            Ok(modified > *since)
+                        } else {
+                            // If we can't get modified time, assume it's not modified
+                            Ok(false)
+                        }
+                    }
+                    Err(_) => Ok(false),
+                }
+            }
+
+            ExecutionCondition::EnvironmentVariable { name, value } => {
+                match context.environment_variables.get(name) {
+                    Some(env_value) => {
+                        if let Some(expected_value) = value {
+                            Ok(env_value == expected_value)
+                        } else {
+                            // If no specific value is required, just check existence
+                            Ok(true)
+                        }
+                    }
+                    None => Ok(false),
+                }
+            }
+
+            ExecutionCondition::PreviousHookSuccess { hook_id } => {
+                match context.execution_results.get(hook_id) {
+                    Some(result) => Ok(result.success),
+                    None => {
+                        // Hook hasn't been executed yet or doesn't exist
+                        tracing::warn!(
+                            "Referenced hook '{}' not found in execution results",
+                            hook_id
+                        );
+                        Ok(false)
+                    }
+                }
+            }
+
+            ExecutionCondition::PreviousHookOutput { hook_id, pattern } => {
+                match context.execution_results.get(hook_id) {
+                    Some(result) => {
+                        use regex::Regex;
+                        match Regex::new(pattern) {
+                            Ok(regex) => Ok(
+                                regex.is_match(&result.stdout) || regex.is_match(&result.stderr)
+                            ),
+                            Err(e) => {
+                                tracing::error!("Invalid regex pattern '{}': {}", pattern, e);
+                                Ok(false)
+                            }
+                        }
+                    }
+                    None => {
+                        tracing::warn!(
+                            "Referenced hook '{}' not found in execution results",
+                            hook_id
+                        );
+                        Ok(false)
+                    }
+                }
+            }
+
+            ExecutionCondition::GitBranch { pattern } => {
+                if let Some(ref git_state) = context.git_state {
+                    use regex::Regex;
+                    match Regex::new(pattern) {
+                        Ok(regex) => Ok(regex.is_match(&git_state.current_branch)),
+                        Err(e) => {
+                            tracing::error!(
+                                "Invalid git branch regex pattern '{}': {}",
+                                pattern,
+                                e
+                            );
+                            Ok(false)
+                        }
+                    }
+                } else {
+                    tracing::debug!("No git state available for branch condition");
+                    Ok(false)
+                }
+            }
+
+            ExecutionCondition::GitHasChanges { paths } => {
+                if let Some(ref git_state) = context.git_state {
+                    if let Some(path_filters) = paths {
+                        // Check if any of the specified paths have changes
+                        Ok(git_state.modified_files.iter().any(|modified_path| {
+                            path_filters.iter().any(|filter_path| {
+                                modified_path.starts_with(filter_path)
+                                    || modified_path == filter_path
+                            })
+                        }))
+                    } else {
+                        // No specific paths specified, check if there are any changes
+                        Ok(git_state.has_changes)
+                    }
+                } else {
+                    tracing::debug!("No git state available for changes condition");
+                    Ok(false)
+                }
+            }
+
+            ExecutionCondition::Custom { evaluator, params } => {
+                // Look up custom evaluator
+                if let Some(custom_evaluator) = self.evaluators.get(evaluator) {
+                    custom_evaluator.evaluate(params, context).await
+                } else {
+                    tracing::error!("Custom condition evaluator '{}' not found", evaluator);
+                    Ok(false)
+                }
+            }
+        }
     }
 }
 
@@ -1207,28 +1337,26 @@ impl HookChainExecutor {
     }
 
     async fn evaluate_conditions(&mut self, conditions: &[ExecutionCondition]) -> Result<bool> {
+        // Create a basic context for condition evaluation
+        // In a full implementation, this would be passed from the calling context
+        let context = ConditionContext {
+            execution_results: HashMap::new(), // Would be populated with previous hook results
+            environment_variables: std::env::vars().collect(),
+            file_system_state: FileSystemSnapshot {
+                file_timestamps: HashMap::new(),
+                file_sizes: HashMap::new(),
+            },
+            git_state: None, // Would be populated with actual git state
+        };
+
+        // Evaluate all conditions - all must be true for the hook to run
         for condition in conditions {
-            match condition {
-                ExecutionCondition::FileExists { path } => {
-                    if !path.exists() {
-                        return Ok(false);
-                    }
-                }
-                ExecutionCondition::FileModified { path, since } => {
-                    if let Ok(metadata) = std::fs::metadata(path) {
-                        if let Ok(modified) = metadata.modified() {
-                            if modified <= *since {
-                                return Ok(false);
-                            }
-                        }
-                    } else {
-                        return Ok(false);
-                    }
-                }
-                _ => {
-                    // For other conditions, return true for now (stub implementation)
-                    continue;
-                }
+            let result = self
+                .condition_evaluator
+                .evaluate(condition, &context)
+                .await?;
+            if !result {
+                return Ok(false);
             }
         }
         Ok(true)

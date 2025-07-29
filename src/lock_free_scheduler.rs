@@ -210,7 +210,6 @@ pub struct LockFreeTaskScheduler {
 
     // Configuration
     num_workers: usize,
-    #[allow(dead_code)]
     local_queue_capacity: usize,
 
     // Task duration tracking for statistics
@@ -466,6 +465,11 @@ impl LockFreeTaskScheduler {
             balance_ratio,
             queue_lengths,
         }
+    }
+
+    /// Get the local queue capacity
+    pub fn get_local_queue_capacity(&self) -> usize {
+        self.local_queue_capacity
     }
 
     // Helper methods
@@ -969,7 +973,6 @@ impl WorkStealingScheduler {
 
 /// Task dependency resolver for managing execution order
 pub struct DependencyResolver {
-    #[allow(dead_code)]
     dependency_graph: Graph<String, ()>,
     ready_tasks: VecDeque<Task>,
     waiting_tasks: HashMap<String, Task>,
@@ -992,6 +995,114 @@ impl DependencyResolver {
         }
     }
 
+    /// Build the dependency graph from tasks
+    fn build_dependency_graph(&mut self, tasks: &[Task]) -> Result<()> {
+        use petgraph::graph::NodeIndex;
+        use std::collections::HashMap as StdHashMap;
+
+        // Clear the existing graph
+        self.dependency_graph.clear();
+
+        // Map task IDs to node indices
+        let mut node_map: StdHashMap<String, NodeIndex> = StdHashMap::new();
+
+        // Add all tasks as nodes
+        for task in tasks {
+            let node_index = self.dependency_graph.add_node(task.id.clone());
+            node_map.insert(task.id.clone(), node_index);
+        }
+
+        // Add dependency edges
+        for task in tasks {
+            if let Some(&task_node) = node_map.get(&task.id) {
+                for dep_id in &task.dependencies {
+                    if let Some(&dep_node) = node_map.get(dep_id) {
+                        // Add edge from dependency to task (dependency -> task)
+                        self.dependency_graph.add_edge(dep_node, task_node, ());
+                    } else {
+                        return Err(SnpError::Process(Box::new(
+                            ProcessError::ConfigurationError {
+                                component: "dependency_resolver".to_string(),
+                                error: format!(
+                                    "Task '{}' depends on unknown task '{}'",
+                                    task.id, dep_id
+                                ),
+                                suggestion: Some("Ensure all task dependencies exist".to_string()),
+                            },
+                        )));
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get tasks that are ready to execute (no pending dependencies)
+    pub fn get_ready_tasks(&mut self) -> Vec<String> {
+        use petgraph::Direction;
+
+        // First check if we have cached ready tasks
+        if !self.ready_tasks.is_empty() {
+            return self.ready_tasks.iter().map(|t| t.id.clone()).collect();
+        }
+
+        let mut ready_task_ids = Vec::new();
+
+        for node_index in self.dependency_graph.node_indices() {
+            // A task is ready if it has no incoming edges (no dependencies)
+            if self
+                .dependency_graph
+                .neighbors_directed(node_index, Direction::Incoming)
+                .count()
+                == 0
+            {
+                if let Some(task_id) = self.dependency_graph.node_weight(node_index) {
+                    if !self.completed_tasks.contains(task_id) {
+                        ready_task_ids.push(task_id.clone());
+                    }
+                }
+            }
+        }
+
+        ready_task_ids
+    }
+
+    /// Update the ready tasks cache
+    pub fn update_ready_tasks_cache(&mut self, tasks: Vec<Task>) {
+        self.ready_tasks.clear();
+        for task in tasks {
+            self.ready_tasks.push_back(task);
+        }
+    }
+
+    /// Get next ready task from cache
+    pub fn pop_ready_task(&mut self) -> Option<Task> {
+        self.ready_tasks.pop_front()
+    }
+
+    /// Mark a task as completed and update the dependency graph
+    pub fn mark_task_completed(&mut self, task_id: &str) {
+        self.completed_tasks.insert(task_id.to_string());
+
+        // Find the node for this task and remove it from the graph
+        if let Some(node_index) = self.find_node_by_id(task_id) {
+            self.dependency_graph.remove_node(node_index);
+        }
+    }
+
+    /// Find a node index by task ID
+    fn find_node_by_id(&self, task_id: &str) -> Option<petgraph::graph::NodeIndex> {
+        for node_index in self.dependency_graph.node_indices() {
+            if let Some(node_task_id) = self.dependency_graph.node_weight(node_index) {
+                if node_task_id == task_id {
+                    return Some(node_index);
+                }
+            }
+        }
+        None
+    }
+
     pub async fn resolve_and_submit(
         &mut self,
         tasks: Vec<Task>,
@@ -1000,43 +1111,44 @@ impl DependencyResolver {
         // Detect circular dependencies first
         self.detect_circular_dependencies(&tasks)?;
 
+        // Build the dependency graph
+        self.build_dependency_graph(&tasks)?;
+
         // Store all tasks for processing
-        let mut all_tasks = Vec::new();
+        let mut task_map = HashMap::new();
         for task in tasks {
-            all_tasks.push(task.clone());
-            if task.dependencies.is_empty() {
-                self.ready_tasks.push_back(task);
-            } else {
-                self.waiting_tasks.insert(task.id.clone(), task);
-            }
+            task_map.insert(task.id.clone(), task);
         }
 
         let mut all_receivers = Vec::new();
 
-        // Submit ready tasks first
-        while let Some(task) = self.ready_tasks.pop_front() {
-            let receiver = scheduler.submit_task(task.clone()).await?;
-            all_receivers.push(receiver);
-            self.completed_tasks.insert(task.id.clone());
+        // Submit tasks in dependency order
+        while !task_map.is_empty() {
+            let ready_task_ids = self.get_ready_tasks();
 
-            // Check if any waiting tasks can now be submitted
-            self.submit_newly_ready_tasks(scheduler, &mut all_receivers)
-                .await?;
+            if ready_task_ids.is_empty() {
+                // No ready tasks - this shouldn't happen if circular dependencies were detected properly
+                // Submit remaining tasks anyway
+                for (_, task) in task_map.drain() {
+                    let receiver = scheduler.submit_task(task).await?;
+                    all_receivers.push(receiver);
+                }
+                break;
+            }
+
+            // Submit all ready tasks
+            for task_id in ready_task_ids {
+                if let Some(task) = task_map.remove(&task_id) {
+                    let receiver = scheduler.submit_task(task).await?;
+                    all_receivers.push(receiver);
+                    self.mark_task_completed(&task_id);
+                }
+            }
         }
 
-        // If no ready tasks were submitted, submit all tasks (dependency order will be handled by scheduler)
-        if all_receivers.is_empty() {
-            for task in all_tasks {
-                let receiver = scheduler.submit_task(task).await?;
-                all_receivers.push(receiver);
-            }
-        } else {
-            // Submit any remaining waiting tasks that couldn't be resolved
-            for (_, task) in self.waiting_tasks.drain() {
-                let receiver = scheduler.submit_task(task).await?;
-                all_receivers.push(receiver);
-            }
-        }
+        // Process any additional newly ready tasks that may have become available
+        self.submit_newly_ready_tasks(scheduler, &mut all_receivers)
+            .await?;
 
         Ok(all_receivers)
     }

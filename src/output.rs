@@ -78,7 +78,6 @@ pub struct OutputAggregator {
     writers: HashMap<String, Box<dyn OutputWriter>>,
     progress_reporter: Option<ProgressReporter>,
     result_formatter: Box<dyn ResultFormatter>,
-    #[allow(dead_code)] // Buffer will be used for buffering in future iterations
     buffer: Arc<Mutex<OutputBuffer>>,
 }
 
@@ -87,7 +86,6 @@ pub struct OutputCollector {
     hook_id: String,
     stdout_buffer: Arc<Mutex<Vec<u8>>>,
     stderr_buffer: Arc<Mutex<Vec<u8>>>,
-    #[allow(dead_code)] // Will be used for coordination in future iterations
     aggregator: Arc<Mutex<OutputAggregator>>,
     start_time: Instant,
 }
@@ -122,12 +120,9 @@ pub struct BufferEntry {
 
 /// Real-time progress reporting during hook execution
 pub struct ProgressReporter {
-    #[allow(dead_code)] // Will be used in future iterations for advanced progress features
     config: ProgressConfig,
     state: ProgressState,
-    #[allow(dead_code)] // Will be used for rendering progress in future iterations
     renderer: Box<dyn ProgressRenderer>,
-    #[allow(dead_code)] // Will be used for throttling updates in future iterations
     update_interval: Duration,
     last_update: Instant,
 }
@@ -167,7 +162,7 @@ pub struct ProgressState {
 
 /// Progress rendering for different output modes
 pub trait ProgressRenderer: Send + Sync {
-    fn render_progress(&self, state: &ProgressState) -> String;
+    fn render_progress(&self, state: &ProgressState, config: &ProgressConfig) -> Result<()>;
     fn clear_progress(&self) -> String;
     fn supports_realtime_updates(&self) -> bool;
 }
@@ -590,6 +585,21 @@ impl OutputCollector {
     }
 
     pub fn handle_line(&mut self, stream: OutputStream, line: &str) -> Result<()> {
+        // Add to aggregator buffer for coordination
+        if let Ok(aggregator) = self.aggregator.lock() {
+            if let Ok(mut buffer) = aggregator.buffer.lock() {
+                let entry = BufferEntry {
+                    timestamp: Instant::now(),
+                    hook_id: self.hook_id.clone(),
+                    stream: stream.clone(),
+                    content: line.to_string(),
+                    metadata: HashMap::new(),
+                };
+                let _ = buffer.add_entry(entry);
+            }
+        }
+
+        // Also handle as before for local collection
         match stream {
             OutputStream::Stdout => self.handle_stdout(line.as_bytes()),
             OutputStream::Stderr => self.handle_stderr(line.as_bytes()),
@@ -725,7 +735,17 @@ impl ProgressReporter {
             self.state.estimated_completion = Some(Instant::now() + estimated_remaining);
         }
 
-        self.last_update = Instant::now();
+        // Render progress if enough time has passed (throttling)
+        let now = Instant::now();
+        if now.duration_since(self.last_update) >= self.update_interval {
+            // Use the renderer to display progress based on config
+            if self.config.show_bar || self.config.show_percentage || self.config.show_current_hook
+            {
+                self.renderer.render_progress(&self.state, &self.config)?;
+            }
+            self.last_update = now;
+        }
+
         Ok(())
     }
 
@@ -765,13 +785,40 @@ impl ProgressReporter {
 
 // Formatter implementations
 pub struct HumanFormatter {
-    #[allow(dead_code)] // Will be used for color formatting in future iterations
     use_colors: bool,
 }
 
 impl HumanFormatter {
     pub fn new() -> Self {
         Self { use_colors: true }
+    }
+
+    pub fn with_colors(use_colors: bool) -> Self {
+        Self { use_colors }
+    }
+
+    fn colorize(&self, text: &str, color: &str) -> String {
+        if self.use_colors {
+            format!("\x1b[{color}m{text}\x1b[0m")
+        } else {
+            text.to_string()
+        }
+    }
+
+    fn green(&self, text: &str) -> String {
+        self.colorize(text, "32")
+    }
+
+    fn red(&self, text: &str) -> String {
+        self.colorize(text, "31")
+    }
+
+    fn yellow(&self, text: &str) -> String {
+        self.colorize(text, "33")
+    }
+
+    fn blue(&self, text: &str) -> String {
+        self.colorize(text, "34")
     }
 }
 
@@ -785,23 +832,30 @@ impl ResultFormatter for HumanFormatter {
     fn format_execution_result(&self, result: &ExecutionResult) -> String {
         format!(
             "Execution completed: {} hooks executed",
-            result.hooks_executed
+            self.blue(&result.hooks_executed.to_string())
         )
     }
 
     fn format_hook_result(&self, result: &HookExecutionResult, _verbose: bool) -> String {
-        format!(
-            "{}: {}",
-            result.hook_id,
-            if result.success { "PASSED" } else { "FAILED" }
-        )
+        let status = if result.success {
+            self.green("PASSED")
+        } else {
+            self.red("FAILED")
+        };
+        format!("{}: {}", self.blue(&result.hook_id), status)
     }
 
     fn format_summary(&self, summary: &ExecutionSummary) -> String {
-        format!(
-            "Summary: {}/{} passed",
-            summary.hooks_passed, summary.total_hooks
-        )
+        let passed_text = if summary.hooks_passed == summary.total_hooks {
+            self.green(&format!("{}/{}", summary.hooks_passed, summary.total_hooks))
+        } else {
+            format!(
+                "{}/{}",
+                self.green(&summary.hooks_passed.to_string()),
+                self.yellow(&summary.total_hooks.to_string())
+            )
+        };
+        format!("Summary: {passed_text} passed")
     }
 
     fn format_error_details(&self, _errors: &[crate::error::HookExecutionError]) -> String {
@@ -819,7 +873,6 @@ impl ResultFormatter for HumanFormatter {
 }
 
 pub struct JsonFormatter {
-    #[allow(dead_code)] // Will be used for compact formatting in future iterations
     compact: bool,
 }
 
@@ -830,6 +883,18 @@ impl JsonFormatter {
 
     pub fn new_compact() -> Self {
         Self { compact: true }
+    }
+
+    fn format_json(&self, json_str: &str) -> String {
+        if self.compact {
+            json_str.to_string()
+        } else {
+            // For non-compact, add some basic formatting
+            json_str
+                .replace(",", ",\n  ")
+                .replace("{", "{\n  ")
+                .replace("}", "\n}")
+        }
     }
 }
 
@@ -859,12 +924,13 @@ impl ResultFormatter for JsonFormatter {
             )
         }).collect();
 
-        format!(
+        let json = format!(
             r#"{{"hooks_executed": {}, "success": {}, "hooks": [{}]}}"#,
             result.hooks_executed,
             result.success,
             hooks_json.join(", ")
-        )
+        );
+        self.format_json(&json)
     }
 
     fn format_hook_result(&self, result: &HookExecutionResult, _verbose: bool) -> String {
@@ -1130,13 +1196,40 @@ impl Default for TerminalProgressRenderer {
 }
 
 impl ProgressRenderer for TerminalProgressRenderer {
-    fn render_progress(&self, state: &ProgressState) -> String {
-        format!(
-            "[{}/{}] {:.1}%",
-            state.completed_hooks,
-            state.total_hooks,
-            (state.completed_hooks as f64 / state.total_hooks as f64) * 100.0
-        )
+    fn render_progress(&self, state: &ProgressState, config: &ProgressConfig) -> Result<()> {
+        let mut parts = Vec::new();
+
+        if config.show_percentage {
+            let percentage = (state.completed_hooks as f64 / state.total_hooks as f64) * 100.0;
+            parts.push(format!("{percentage:.1}%"));
+        }
+
+        if config.show_bar {
+            let bar_width = config.bar_width;
+            let filled = (state.completed_hooks * bar_width) / state.total_hooks;
+            let empty = bar_width - filled;
+            let bar = format!("[{}{}]", "=".repeat(filled), " ".repeat(empty));
+            parts.push(bar);
+        }
+
+        if config.show_current_hook {
+            if let Some(ref hook) = state.current_hook {
+                parts.push(format!("Running: {hook}"));
+            }
+        }
+
+        if config.show_time_remaining {
+            if let Some(completion) = state.estimated_completion {
+                let remaining = completion.saturating_duration_since(Instant::now());
+                parts.push(format!("ETA: {remaining:?}"));
+            }
+        }
+
+        if !parts.is_empty() {
+            println!("{}", parts.join(" "));
+        }
+
+        Ok(())
     }
 
     fn clear_progress(&self) -> String {
@@ -1292,13 +1385,13 @@ mod tests {
         struct MockRenderer;
 
         impl ProgressRenderer for MockRenderer {
-            fn render_progress(&self, state: &ProgressState) -> String {
-                format!(
-                    "[{}/{}] {:.1}%",
-                    state.completed_hooks,
-                    state.total_hooks,
-                    (state.completed_hooks as f64 / state.total_hooks as f64) * 100.0
-                )
+            fn render_progress(
+                &self,
+                state: &ProgressState,
+                config: &ProgressConfig,
+            ) -> Result<()> {
+                let _ = (state, config); // Use the parameters to avoid unused parameter warnings
+                Ok(())
             }
 
             fn clear_progress(&self) -> String {
@@ -1319,10 +1412,10 @@ mod tests {
             start_time: Instant::now(),
             estimated_completion: None,
         };
+        let config = ProgressConfig::default();
 
-        let rendered = renderer.render_progress(&state);
-        assert!(rendered.contains("[3/10]"));
-        assert!(rendered.contains("30.0%"));
+        let result = renderer.render_progress(&state, &config);
+        assert!(result.is_ok());
     }
 
     #[test]

@@ -335,22 +335,106 @@ pub struct RecoveryStatistics {
 }
 
 /// Recovery history for circuit breaker functionality
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct RecoveryHistory {
-    #[allow(dead_code)]
     entries: Vec<RecoveryHistoryEntry>,
+    max_entries: usize,
+}
+
+impl Default for RecoveryHistory {
+    fn default() -> Self {
+        Self::new(100) // Default to 100 entries
+    }
 }
 
 #[derive(Debug)]
-struct RecoveryHistoryEntry {
-    #[allow(dead_code)]
-    operation_id: String,
-    #[allow(dead_code)]
-    timestamp: SystemTime,
-    #[allow(dead_code)]
-    success: bool,
-    #[allow(dead_code)]
-    strategy: String,
+pub struct RecoveryHistoryEntry {
+    pub operation_id: String,
+    pub timestamp: SystemTime,
+    pub success: bool,
+    pub strategy: String,
+}
+
+impl RecoveryHistory {
+    pub fn new(max_entries: usize) -> Self {
+        Self {
+            entries: Vec::new(),
+            max_entries,
+        }
+    }
+
+    pub fn add_entry(&mut self, operation_id: String, success: bool, strategy: String) {
+        let entry = RecoveryHistoryEntry {
+            operation_id,
+            timestamp: SystemTime::now(),
+            success,
+            strategy,
+        };
+
+        self.entries.push(entry);
+
+        // Keep only the most recent entries
+        if self.entries.len() > self.max_entries {
+            self.entries.remove(0);
+        }
+    }
+
+    pub fn get_success_rate(&self, since: SystemTime) -> f64 {
+        let recent_entries: Vec<_> = self
+            .entries
+            .iter()
+            .filter(|e| e.timestamp >= since)
+            .collect();
+
+        if recent_entries.is_empty() {
+            return 1.0; // Assume success if no history
+        }
+
+        let successes = recent_entries.iter().filter(|e| e.success).count();
+        successes as f64 / recent_entries.len() as f64
+    }
+
+    pub fn get_recent_failures(&self, strategy: &str, since: SystemTime) -> usize {
+        self.entries
+            .iter()
+            .filter(|e| e.strategy == strategy && e.timestamp >= since && !e.success)
+            .count()
+    }
+
+    pub fn clear_old_entries(&mut self, older_than: SystemTime) {
+        self.entries.retain(|e| e.timestamp >= older_than);
+    }
+
+    /// Get all entries for a specific operation ID
+    pub fn get_entries_for_operation(&self, operation_id: &str) -> Vec<&RecoveryHistoryEntry> {
+        self.entries
+            .iter()
+            .filter(|e| e.operation_id == operation_id)
+            .collect()
+    }
+
+    /// Get success rate for a specific operation ID
+    pub fn get_operation_success_rate(&self, operation_id: &str) -> Option<f64> {
+        let operation_entries: Vec<_> = self
+            .entries
+            .iter()
+            .filter(|e| e.operation_id == operation_id)
+            .collect();
+
+        if operation_entries.is_empty() {
+            return None;
+        }
+
+        let successful = operation_entries.iter().filter(|e| e.success).count();
+        Some(successful as f64 / operation_entries.len() as f64)
+    }
+
+    /// Check if an operation has been attempted recently
+    pub fn has_recent_attempts(&self, operation_id: &str, since: SystemTime) -> bool {
+        self.entries
+            .iter()
+            .any(|e| e.operation_id == operation_id && e.timestamp >= since)
+    }
 }
 
 /// Recovery engine configuration
@@ -386,7 +470,6 @@ pub struct RecoveryEngine {
     strategies: HashMap<ErrorType, RecoveryStrategy>,
     global_config: RecoveryConfig,
     retry_statistics: Arc<Mutex<RecoveryStatistics>>,
-    #[allow(dead_code)]
     recovery_history: Arc<Mutex<RecoveryHistory>>,
     circuit_breakers: Arc<Mutex<HashMap<String, CircuitBreakerState>>>,
     rate_limiters: Arc<Mutex<HashMap<String, RateLimiter>>>,
@@ -403,7 +486,6 @@ struct CircuitBreakerState {
 enum CircuitState {
     Closed,
     Open,
-    #[allow(dead_code)]
     HalfOpen,
 }
 
@@ -453,7 +535,7 @@ impl RecoveryEngine {
             strategies,
             global_config: config,
             retry_statistics: Arc::new(Mutex::new(RecoveryStatistics::default())),
-            recovery_history: Arc::new(Mutex::new(RecoveryHistory::default())),
+            recovery_history: Arc::new(Mutex::new(RecoveryHistory::new(1000))), // Keep last 1000 entries
             circuit_breakers: Arc::new(Mutex::new(HashMap::new())),
             rate_limiters: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -733,23 +815,24 @@ impl RecoveryEngine {
     }
 
     fn is_circuit_open(&self, operation_id: &str) -> bool {
-        if let Ok(circuit_breakers) = self.circuit_breakers.lock() {
-            if let Some(breaker) = circuit_breakers.get(operation_id) {
+        if let Ok(mut circuit_breakers) = self.circuit_breakers.lock() {
+            if let Some(breaker) = circuit_breakers.get_mut(operation_id) {
                 return match breaker.state {
                     CircuitState::Open => {
                         let now = SystemTime::now();
                         let time_since_failure =
                             now.duration_since(breaker.last_failure).unwrap_or_default();
 
-                        // Check if timeout has passed
                         if time_since_failure > self.global_config.circuit_breaker_timeout {
-                            // Circuit should transition to half-open
+                            // Transition to half-open to allow one test request
+                            breaker.state = CircuitState::HalfOpen;
                             false
                         } else {
                             true
                         }
                     }
-                    CircuitState::Closed | CircuitState::HalfOpen => false,
+                    CircuitState::Closed => false,
+                    CircuitState::HalfOpen => false, // Allow one test request
                 };
             }
         }
@@ -775,8 +858,24 @@ impl RecoveryEngine {
         if let Ok(mut breakers) = self.circuit_breakers.lock() {
             if let Some(breaker) = breakers.get_mut(&context.operation_id) {
                 breaker.failures = 0;
+                // Handle half-open -> closed transition
+                if breaker.state == CircuitState::HalfOpen {
+                    tracing::info!(
+                        "Circuit breaker closed for operation {}",
+                        context.operation_id
+                    );
+                }
                 breaker.state = CircuitState::Closed;
             }
+        }
+
+        // Record in recovery history
+        if let Ok(mut history) = self.recovery_history.lock() {
+            history.add_entry(
+                context.operation_id.clone(),
+                true,
+                "successful_recovery".to_string(),
+            );
         }
 
         tracing::info!(
@@ -808,12 +907,29 @@ impl RecoveryEngine {
             breaker.last_failure = SystemTime::now();
 
             if breaker.failures >= self.global_config.circuit_breaker_threshold {
+                // Handle half-open -> open transition on failure
+                if breaker.state == CircuitState::HalfOpen {
+                    tracing::warn!(
+                        "Circuit breaker reopened for operation {} (half-open test failed)",
+                        context.operation_id
+                    );
+                } else {
+                    tracing::warn!(
+                        "Circuit breaker opened for operation {}",
+                        context.operation_id
+                    );
+                }
                 breaker.state = CircuitState::Open;
-                tracing::warn!(
-                    "Circuit breaker opened for operation {}",
-                    context.operation_id
-                );
             }
+        }
+
+        // Record in recovery history
+        if let Ok(mut history) = self.recovery_history.lock() {
+            history.add_entry(
+                context.operation_id.clone(),
+                false,
+                "failed_recovery".to_string(),
+            );
         }
 
         // Update rate limiter

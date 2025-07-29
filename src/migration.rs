@@ -18,7 +18,7 @@ pub struct MigrationConfig {
     pub strict_mode: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ConfigFormat {
     PreCommitPython { version: String },
     SnpV1 { version: String },
@@ -77,11 +77,8 @@ pub struct MigrationError {
 /// Main configuration migrator
 pub struct ConfigMigrator {
     migration_rules: HashMap<String, MigrationRule>,
-    #[allow(dead_code)]
     format_detectors: Vec<Box<dyn FormatDetector>>,
-    #[allow(dead_code)]
     transformers: HashMap<String, Box<dyn ValueTransformer>>,
-    #[allow(dead_code)]
     validators: HashMap<ConfigFormat, Box<dyn ConfigValidator>>,
 }
 
@@ -187,7 +184,7 @@ pub trait ValueTransformer: Send + Sync + std::panic::RefUnwindSafe {
 /// Configuration validation trait
 pub trait ConfigValidator: Send + Sync + std::panic::RefUnwindSafe {
     fn validate(&self, config: &Value) -> Result<Vec<String>>;
-    fn get_format(&self) -> &ConfigFormat;
+    fn get_format(&self) -> ConfigFormat;
 }
 
 impl Default for ConfigMigrator {
@@ -198,12 +195,40 @@ impl Default for ConfigMigrator {
 
 impl ConfigMigrator {
     pub fn new() -> Self {
-        Self {
+        let mut migrator = Self {
             migration_rules: HashMap::new(),
             format_detectors: Vec::new(),
             transformers: HashMap::new(),
             validators: HashMap::new(),
-        }
+        };
+
+        // Add default format detectors
+        migrator.format_detectors.push(Box::new(YamlFormatDetector));
+        migrator.format_detectors.push(Box::new(JsonFormatDetector));
+
+        // Add default value transformers
+        migrator
+            .transformers
+            .insert("string_normalizer".to_string(), Box::new(StringNormalizer));
+        migrator
+            .transformers
+            .insert("path_converter".to_string(), Box::new(PathConverter));
+
+        // Add default validators
+        migrator.validators.insert(
+            ConfigFormat::PreCommitPython {
+                version: "4.0.0".to_string(),
+            },
+            Box::new(PreCommitValidator),
+        );
+        migrator.validators.insert(
+            ConfigFormat::SnpV1 {
+                version: "1.0.0".to_string(),
+            },
+            Box::new(SnpValidator),
+        );
+
+        migrator
     }
 
     pub fn with_custom_rules(mut self, rules: Vec<MigrationRule>) -> Self {
@@ -211,6 +236,65 @@ impl ConfigMigrator {
             self.migration_rules.insert(rule.id.clone(), rule);
         }
         self
+    }
+
+    /// Add a format detector
+    pub fn add_format_detector(&mut self, detector: Box<dyn FormatDetector>) {
+        self.format_detectors.push(detector);
+    }
+
+    /// Add a value transformer
+    pub fn add_transformer(&mut self, id: String, transformer: Box<dyn ValueTransformer>) {
+        self.transformers.insert(id, transformer);
+    }
+
+    /// Add a config validator
+    pub fn add_validator(&mut self, format: ConfigFormat, validator: Box<dyn ConfigValidator>) {
+        self.validators.insert(format, validator);
+    }
+
+    /// Detect configuration format using registered detectors
+    pub fn auto_detect_format(&self, content: &str) -> Option<ConfigFormat> {
+        let mut best_match = None;
+        let mut best_confidence = 0.0;
+
+        for detector in &self.format_detectors {
+            if let Some(format) = detector.detect_format(content) {
+                let confidence = detector.confidence_score(content);
+                if confidence > best_confidence {
+                    best_confidence = confidence;
+                    best_match = Some(format);
+                }
+            }
+        }
+
+        best_match
+    }
+
+    /// Validate configuration using appropriate validator
+    pub fn validate_config(&self, config: &Value, format: &ConfigFormat) -> Result<Vec<String>> {
+        if let Some(validator) = self.validators.get(format) {
+            validator.validate(config)
+        } else {
+            Ok(vec![format!(
+                "No validator available for format: {:?}",
+                format
+            )])
+        }
+    }
+
+    /// Transform value using specified transformer
+    pub fn transform_value(&self, value: &Value, transformer_id: &str) -> Result<Value> {
+        if let Some(transformer) = self.transformers.get(transformer_id) {
+            transformer.transform(value)
+        } else {
+            Err(SnpError::Config(Box::new(ConfigError::InvalidYaml {
+                message: format!("Unknown transformer: {transformer_id}"),
+                line: None,
+                column: None,
+                file_path: None,
+            })))
+        }
     }
 
     // Main migration methods
@@ -738,6 +822,146 @@ impl Default for MigrationConfig {
     }
 }
 
+// Concrete implementations for format detectors, transformers, and validators
+
+/// YAML format detector
+pub struct YamlFormatDetector;
+
+impl FormatDetector for YamlFormatDetector {
+    fn detect_format(&self, content: &str) -> Option<ConfigFormat> {
+        if content.trim_start().starts_with("repos:") && content.contains("hooks:") {
+            Some(ConfigFormat::PreCommitPython {
+                version: "4.0.0".to_string(),
+            })
+        } else if content.contains("snp_version:") || content.contains("snp:") {
+            Some(ConfigFormat::SnpV1 {
+                version: "1.0.0".to_string(),
+            })
+        } else {
+            None
+        }
+    }
+
+    fn confidence_score(&self, content: &str) -> f64 {
+        if content.trim_start().starts_with("repos:") && content.contains("hooks:") {
+            0.9
+        } else if content.contains("snp_version:") || content.contains("snp:") {
+            0.8
+        } else {
+            0.0
+        }
+    }
+}
+
+/// JSON format detector
+pub struct JsonFormatDetector;
+
+impl FormatDetector for JsonFormatDetector {
+    fn detect_format(&self, content: &str) -> Option<ConfigFormat> {
+        if content.trim_start().starts_with('{') && content.contains("\"repos\"") {
+            Some(ConfigFormat::PreCommitPython {
+                version: "4.0.0".to_string(),
+            })
+        } else {
+            None
+        }
+    }
+
+    fn confidence_score(&self, content: &str) -> f64 {
+        if content.trim_start().starts_with('{') && content.contains("\"repos\"") {
+            0.7
+        } else {
+            0.0
+        }
+    }
+}
+
+/// String normalizer transformer
+pub struct StringNormalizer;
+
+impl ValueTransformer for StringNormalizer {
+    fn transform(&self, value: &Value) -> Result<Value> {
+        match value {
+            Value::String(s) => Ok(Value::String(s.trim().to_string())),
+            _ => Ok(value.clone()),
+        }
+    }
+
+    fn get_transformer_id(&self) -> &str {
+        "string_normalizer"
+    }
+}
+
+/// Path converter transformer
+pub struct PathConverter;
+
+impl ValueTransformer for PathConverter {
+    fn transform(&self, value: &Value) -> Result<Value> {
+        match value {
+            Value::String(s) => {
+                // Normalize path separators
+                let normalized = s.replace('\\', "/");
+                Ok(Value::String(normalized))
+            }
+            _ => Ok(value.clone()),
+        }
+    }
+
+    fn get_transformer_id(&self) -> &str {
+        "path_converter"
+    }
+}
+
+/// Pre-commit configuration validator
+pub struct PreCommitValidator;
+
+impl ConfigValidator for PreCommitValidator {
+    fn validate(&self, config: &Value) -> Result<Vec<String>> {
+        let mut errors = Vec::new();
+
+        if let Value::Mapping(map) = config {
+            if !map.contains_key(Value::String("repos".to_string())) {
+                errors.push("Missing required 'repos' field".to_string());
+            }
+        } else {
+            errors.push("Configuration must be a YAML mapping".to_string());
+        }
+
+        Ok(errors)
+    }
+
+    fn get_format(&self) -> ConfigFormat {
+        ConfigFormat::PreCommitPython {
+            version: "4.0.0".to_string(),
+        }
+    }
+}
+
+/// SNP configuration validator
+pub struct SnpValidator;
+
+impl ConfigValidator for SnpValidator {
+    fn validate(&self, config: &Value) -> Result<Vec<String>> {
+        let mut errors = Vec::new();
+
+        if let Value::Mapping(map) = config {
+            if !map.contains_key(Value::String("hooks".to_string())) {
+                errors.push("Missing required 'hooks' field".to_string());
+            }
+        } else {
+            errors.push("Configuration must be a YAML mapping".to_string());
+        }
+
+        Ok(errors)
+    }
+
+    fn get_format(&self) -> ConfigFormat {
+        ConfigFormat::SnpV1 {
+            version: "1.0.0".to_string(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1099,9 +1323,9 @@ repos:
     fn test_migrator_creation() {
         let migrator = ConfigMigrator::new();
         assert_eq!(migrator.migration_rules.len(), 0);
-        assert_eq!(migrator.format_detectors.len(), 0);
-        assert_eq!(migrator.transformers.len(), 0);
-        assert_eq!(migrator.validators.len(), 0);
+        assert_eq!(migrator.format_detectors.len(), 2); // YamlFormatDetector and JsonFormatDetector
+        assert_eq!(migrator.transformers.len(), 2); // string_normalizer and path_converter
+        assert_eq!(migrator.validators.len(), 2); // PreCommitValidator and SnpValidator
     }
 
     #[test]

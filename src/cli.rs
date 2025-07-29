@@ -6,6 +6,7 @@ use crate::cache::CacheConfig;
 use crate::commands::run;
 use crate::core::Stage;
 use crate::error::Result;
+use crate::events::{EventBus, LoggingEventHandler, MetricsEventHandler};
 use crate::execution::ExecutionConfig;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -48,6 +49,14 @@ pub struct Cli {
     /// Set L2 cache size (warm patterns)
     #[arg(long, global = true, value_name = "SIZE")]
     pub cache_l2_size: Option<usize>,
+
+    /// Disable event system
+    #[arg(long, global = true)]
+    pub no_events: bool,
+
+    /// Enable event system verbose logging
+    #[arg(long, global = true)]
+    pub event_verbose: bool,
 }
 
 impl Cli {
@@ -291,6 +300,9 @@ impl Cli {
             crate::user_output::UserOutputConfig::new(self.verbose, self.quiet, self.color.clone());
         let user_output = crate::user_output::UserOutput::new(user_output_config);
 
+        // Initialize event system with configuration from config file
+        let event_bus = self.create_event_bus().await?;
+
         match &self.command {
             Some(Commands::Run {
                 hook,
@@ -355,7 +367,8 @@ impl Cli {
                     .with_verbose(*verbose || self.verbose)
                     .with_fail_fast(*fail_fast)
                     .with_hook_timeout(Duration::from_secs(60))
-                    .with_user_output(user_output.clone());
+                    .with_user_output(user_output.clone())
+                    .with_event_bus(std::sync::Arc::clone(&event_bus));
 
                 // Set parallel execution if jobs flag is provided
                 if let Some(max_jobs) = jobs {
@@ -772,7 +785,8 @@ impl Cli {
 
                 let execution_config = ExecutionConfig::new(Stage::PreCommit)
                     .with_verbose(self.verbose)
-                    .with_user_output(user_output.clone());
+                    .with_user_output(user_output.clone())
+                    .with_event_bus(std::sync::Arc::clone(&event_bus));
 
                 let execution_result =
                     run::execute_run_command(&repo_path, &self.config, &execution_config).await?;
@@ -882,6 +896,57 @@ impl Cli {
         }
 
         Ok(0)
+    }
+
+    /// Create and configure event bus based on config file settings
+    async fn create_event_bus(&self) -> Result<std::sync::Arc<EventBus>> {
+        // Try to load event configuration from config file
+        let mut event_config = self.load_event_config().await.unwrap_or_default();
+
+        // Override with CLI flags
+        if self.no_events {
+            event_config.enabled = false;
+        }
+
+        // Create event bus with configuration
+        let mut event_bus = EventBus::with_config(event_config);
+
+        // Register built-in handlers
+        let logging_handler = std::sync::Arc::new(LoggingEventHandler::new());
+        event_bus.register_handler(logging_handler);
+
+        let metrics_handler = std::sync::Arc::new(MetricsEventHandler::new());
+        event_bus.register_handler(metrics_handler);
+
+        Ok(std::sync::Arc::new(event_bus))
+    }
+
+    /// Load event configuration from config file
+    async fn load_event_config(&self) -> Result<crate::events::EventConfig> {
+        use crate::config::Config;
+
+        // Get current directory as repository path
+        let repo_path = std::env::current_dir().map_err(|e| {
+            crate::error::SnpError::Cli(Box::new(crate::error::CliError::RuntimeError {
+                message: format!("Failed to get current directory: {e}"),
+            }))
+        })?;
+
+        // Try to load the config file
+        let config_path = repo_path.join(&self.config);
+        if !config_path.exists() {
+            // If config file doesn't exist, return default event config
+            return Ok(crate::events::EventConfig::default());
+        }
+
+        // Load and parse the config file
+        match Config::from_file(&config_path) {
+            Ok(config) => Ok(config.events.unwrap_or_default()),
+            Err(_) => {
+                // If config loading fails, return default event config
+                Ok(crate::events::EventConfig::default())
+            }
+        }
     }
 }
 

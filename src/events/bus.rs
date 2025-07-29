@@ -8,14 +8,36 @@ use std::time::Duration;
 use tokio::sync::{broadcast, Mutex};
 
 /// Configuration for event bus behavior
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct EventConfig {
-    pub enabled: bool,                 // Default: true
-    pub channel_capacity: usize,       // Default: 1000
-    pub enable_persistence: bool,      // Default: false
+    pub enabled: bool,            // Default: true
+    pub channel_capacity: usize,  // Default: 1000
+    pub enable_persistence: bool, // Default: false
+    #[serde(with = "duration_serde")]
     pub max_handler_timeout: Duration, // Default: 5s
-    pub retry_failed_handlers: bool,   // Default: true
-    pub emit_progress_events: bool,    // Default: true
+    pub retry_failed_handlers: bool, // Default: true
+    pub emit_progress_events: bool, // Default: true
+}
+
+mod duration_serde {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::time::Duration;
+
+    pub fn serialize<S>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        duration.as_secs().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let secs = u64::deserialize(deserializer)?;
+        Ok(Duration::from_secs(secs))
+    }
 }
 
 impl Default for EventConfig {

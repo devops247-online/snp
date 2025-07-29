@@ -457,8 +457,7 @@ mod tests {
                 .unwrap_or(0)
         }
 
-        #[allow(dead_code)]
-        fn get_gauge(&self, name: &str) -> f64 {
+        pub fn get_gauge(&self, name: &str) -> f64 {
             self.gauges
                 .lock()
                 .unwrap()
@@ -553,6 +552,29 @@ mod tests {
         assert_eq!(durations[0].1, Duration::from_millis(100));
 
         assert_eq!(test_collector.get_counter("hooks_completed"), 1);
+    }
+
+    #[tokio::test]
+    async fn test_pipeline_completed_sets_gauge() {
+        let test_collector = Arc::new(TestMetricsCollector::new());
+        let handler = MetricsEventHandler::with_collector(test_collector.clone());
+
+        let summary = crate::events::event::EventExecutionSummary {
+            total_hooks: 10,
+            hooks_passed: 8,
+            hooks_failed: 2,
+            hooks_skipped: 0,
+            total_duration: Duration::from_secs(5),
+        };
+
+        let event =
+            HookEvent::pipeline_completed(Uuid::new_v4(), crate::core::Stage::PreCommit, summary);
+
+        handler.handle_event(&event).await.unwrap();
+
+        // Verify that the gauge was set correctly using get_gauge
+        let success_rate = test_collector.get_gauge("pipeline_success_rate");
+        assert_eq!(success_rate, 0.8); // 8/10 = 0.8
     }
 
     #[tokio::test]

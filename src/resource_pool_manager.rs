@@ -5,13 +5,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
-use tokio::time::Interval;
 
 use crate::error::Result;
 use crate::pooled_git::{GitPoolConfig, PooledGitRepository};
 use crate::pooled_language::{LanguagePoolConfig, PooledLanguageEnvironment};
 use crate::resource_pool::{PoolConfig, ResourcePool};
-use crate::storage::Store;
 
 /// Configuration for the resource pool manager
 #[derive(Debug, Clone)]
@@ -48,6 +46,34 @@ impl Default for ResourcePoolManagerConfig {
     }
 }
 
+impl ResourcePoolManagerConfig {
+    /// Create a minimal configuration for basic operation
+    /// Used as a fallback when full initialization fails
+    pub fn minimal() -> Self {
+        let cache_dir = std::env::temp_dir().join("snp-resource-pools-minimal");
+
+        Self {
+            git_pool: GitPoolConfig {
+                work_dir_template: cache_dir.join("git-{}").to_string_lossy().to_string(),
+                cleanup_on_reset: false, // Minimal cleanup
+                verify_health: false,    // Disable health checks for fallback
+                max_cached_states: 1,    // Minimal cache
+            },
+            language_pool: LanguagePoolConfig {
+                language: "system".to_string(),
+                default_version: None,
+                cache_directory: cache_dir.join("languages"),
+                match_dependencies: false, // Simplified dependency matching
+                max_dependency_combinations: 1, // Minimal combinations
+                setup_timeout: Duration::from_secs(30), // Shorter timeout
+            },
+            maintenance_interval: Duration::from_secs(300), // 5 minutes
+            enable_health_checks: false,
+            cache_directory: cache_dir,
+        }
+    }
+}
+
 /// Manager for coordinating multiple resource pools
 pub struct ResourcePoolManager {
     /// Git repository pools keyed by configuration hash
@@ -56,19 +82,13 @@ pub struct ResourcePoolManager {
     language_pools: HashMap<String, Arc<ResourcePool<PooledLanguageEnvironment>>>,
     /// Configuration
     config: ResourcePoolManagerConfig,
-    /// Storage reference for cleanup and coordination
-    #[allow(dead_code)]
-    storage: Arc<Store>,
     /// Background maintenance task handle
     maintenance_task: Option<JoinHandle<()>>,
-    /// Maintenance interval timer
-    #[allow(dead_code)]
-    maintenance_interval: Option<Interval>,
 }
 
 impl ResourcePoolManager {
     /// Create a new resource pool manager
-    pub async fn new(config: ResourcePoolManagerConfig, storage: Arc<Store>) -> Result<Self> {
+    pub async fn new(config: ResourcePoolManagerConfig) -> Result<Self> {
         // Ensure cache directory exists
         tokio::fs::create_dir_all(&config.cache_directory).await?;
 
@@ -76,9 +96,7 @@ impl ResourcePoolManager {
             git_pools: HashMap::new(),
             language_pools: HashMap::new(),
             config,
-            storage,
             maintenance_task: None,
-            maintenance_interval: None,
         };
 
         // Start maintenance task if enabled
@@ -318,7 +336,6 @@ mod tests {
 
     async fn create_test_manager() -> (TempDir, ResourcePoolManager) {
         let temp_dir = TempDir::new().unwrap();
-        let storage = Arc::new(Store::with_cache_directory(temp_dir.path().to_path_buf()).unwrap());
 
         let config = ResourcePoolManagerConfig {
             cache_directory: temp_dir.path().to_path_buf(),
@@ -326,7 +343,7 @@ mod tests {
             ..Default::default()
         };
 
-        let manager = ResourcePoolManager::new(config, storage).await.unwrap();
+        let manager = ResourcePoolManager::new(config).await.unwrap();
         (temp_dir, manager)
     }
 

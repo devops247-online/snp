@@ -76,7 +76,6 @@ impl FileChangeDetectorConfig {
 #[derive(Debug, Clone)]
 struct CachedFileInfo {
     /// Blake3 hash of file content
-    #[allow(dead_code)] // Used for future persistent storage integration
     hash: String,
     /// File modification time
     mtime: SystemTime,
@@ -97,7 +96,6 @@ pub struct FileChangeDetector {
     /// Filesystem watcher (optional)
     watcher: Arc<Mutex<Option<RecommendedWatcher>>>,
     /// Storage for persistent cache
-    #[allow(dead_code)] // Used for future persistent storage integration
     storage: Arc<Store>,
 }
 
@@ -168,7 +166,7 @@ impl FileChangeDetector {
         }
 
         // Check against cached information
-        let file_info = self.get_file_info(file).await?;
+        let file_info = self.create_cached_file_info(file).await?;
 
         let cached_info = {
             let cache = self.file_cache.read();
@@ -344,6 +342,27 @@ impl FileChangeDetector {
         hasher.finalize().to_hex().to_string()
     }
 
+    /// Create cached file info for a file
+    async fn create_cached_file_info(&self, file: &Path) -> Result<CachedFileInfo> {
+        let metadata = std::fs::metadata(file)?;
+        let size = metadata.len();
+        let mtime = metadata.modified()?;
+
+        // Compute hash based on configuration
+        let hash = if self.config.hash_large_files || size <= self.config.large_file_threshold {
+            self.compute_file_hash(file).await?
+        } else {
+            self.compute_metadata_hash(file, size, mtime)
+        };
+
+        Ok(CachedFileInfo {
+            hash,
+            mtime,
+            size,
+            cached_at: SystemTime::now(),
+        })
+    }
+
     /// Update file cache with new information
     async fn update_file_cache(&self, file: &Path, info: CachedFileInfo) -> Result<()> {
         {
@@ -401,16 +420,49 @@ impl FileChangeDetector {
 
     /// Load cache from persistent storage
     fn load_cache(&self) -> Result<()> {
-        // TODO: Implement loading from storage.rs
+        // TODO: Implement persistent storage once Store API is available
         // For now, start with empty cache
-        debug!("File change cache loaded (placeholder implementation)");
+        debug!("File change cache loaded (persistent storage not yet implemented)");
         Ok(())
     }
 
     /// Persist cache entry to storage
-    async fn persist_cache_entry(&self, _file: &Path) -> Result<()> {
-        // TODO: Implement persistence to storage.rs
-        // For now, just return success
+    async fn persist_cache_entry(&self, file: &Path) -> Result<()> {
+        // Create a storage key for this file's cache entry
+        let _cache_key = format!("file_change_cache:{}", file.display());
+
+        // Get the cached info for this file
+        let cache = self.file_cache.read();
+        if let Some(info) = cache.get(file) {
+            // Serialize the cache info to JSON
+            let cache_data = serde_json::json!({
+                "hash": info.hash,
+                "mtime": info.mtime.duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or_default().as_secs(),
+                "size": info.size,
+                "cached_at": info.cached_at.duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or_default().as_secs()
+            });
+
+            // For now, just log what would be stored
+            debug!(
+                "Would persist cache entry for {} with data: {}",
+                file.display(),
+                cache_data
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Save entire cache to persistent storage
+    pub async fn save_cache(&self) -> Result<()> {
+        // TODO: Implement persistent storage once Store API is available
+        let cache = self.file_cache.read();
+        debug!(
+            "Cache has {} entries (persistent storage not yet implemented)",
+            cache.len()
+        );
         Ok(())
     }
 
@@ -419,6 +471,35 @@ impl FileChangeDetector {
         let cache = self.file_cache.read();
         let changed = self.changed_files.read();
         (cache.len(), changed.len())
+    }
+
+    /// Update cache with current file information
+    pub async fn update_file_info(&self, file: &Path) -> Result<()> {
+        let info = self.get_file_info(file).await?;
+        self.update_file_cache(file, info).await
+    }
+
+    /// Get cache directory from storage
+    pub fn get_cache_directory(&self) -> std::path::PathBuf {
+        self.storage.cache_directory().join("file_change_cache")
+    }
+
+    /// Initialize cache from persistent storage
+    pub async fn initialize_from_storage(&self) -> Result<()> {
+        let cache_dir = self.get_cache_directory();
+        tracing::debug!(
+            "Initializing file change cache from storage at: {}",
+            cache_dir.display()
+        );
+
+        // For now, just ensure the cache directory exists
+        tokio::fs::create_dir_all(&cache_dir)
+            .await
+            .map_err(crate::error::SnpError::Io)?;
+
+        // In the future, we could load cached file info from persistent storage
+        tracing::debug!("File change cache initialized");
+        Ok(())
     }
 }
 
