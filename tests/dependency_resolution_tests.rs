@@ -48,21 +48,46 @@ async fn test_dependency_graph_cycle_detection() {
     graph.add_task(config_b);
     graph.add_task(config_c);
 
-    // Create cycle: a -> b -> c -> a
+    // Create partial cycle: a -> b -> c
     graph.add_dependency("task_b", "task_a").unwrap();
     graph.add_dependency("task_c", "task_b").unwrap();
-    graph.add_dependency("task_a", "task_c").unwrap();
 
-    // Cycle detection should fail
-    let cycle_result = graph.detect_cycles();
-    assert!(cycle_result.is_err(), "Should detect circular dependency");
+    // Attempting to complete the cycle (c -> a) should fail
+    let cycle_addition = graph.add_dependency("task_a", "task_c");
+    assert!(
+        cycle_addition.is_err(),
+        "Should prevent circular dependency creation"
+    );
 
-    // Topological sort should also fail due to cycle
+    // Verify the error indicates a circular dependency was detected
+    if let Err(error) = cycle_addition {
+        let error_msg = error.to_string();
+        // The error should indicate cycle detection (either directly or through nested errors)
+        assert!(
+            error_msg.contains("Circular")
+                || error_msg.contains("cycle")
+                || error_msg.contains("Cycle"),
+            "Error should indicate cycle detection: {error_msg}"
+        );
+    }
+
+    // Since the cycle was prevented, topological sort should succeed
     let topo_result = graph.resolve_execution_order();
     assert!(
-        topo_result.is_err(),
-        "Topological sort should fail with cycles"
+        topo_result.is_ok(),
+        "Topological sort should succeed without cycles"
     );
+
+    // Verify the valid execution order
+    if let Ok(execution_order) = topo_result {
+        assert_eq!(execution_order.len(), 3, "Should have all three tasks");
+        // task_a should come before task_b, and task_b should come before task_c
+        let a_pos = execution_order.iter().position(|t| t == "task_a").unwrap();
+        let b_pos = execution_order.iter().position(|t| t == "task_b").unwrap();
+        let c_pos = execution_order.iter().position(|t| t == "task_c").unwrap();
+        assert!(a_pos < b_pos, "task_a should come before task_b");
+        assert!(b_pos < c_pos, "task_b should come before task_c");
+    }
 }
 
 #[tokio::test]
