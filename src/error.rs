@@ -399,6 +399,13 @@ pub enum ProcessError {
 
     #[error("Process termination failed: {command}")]
     TerminationFailed { command: String, error: String },
+
+    #[error("Configuration error in {component}: {error}")]
+    ConfigurationError {
+        component: String,
+        error: String,
+        suggestion: Option<String>,
+    },
 }
 
 /// File locking errors with detailed context

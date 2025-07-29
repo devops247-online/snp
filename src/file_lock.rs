@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime};
 use fs2::FileExt;
 
 /// Lock types and modes
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LockType {
     Shared,    // Multiple readers
     Exclusive, // Single writer
@@ -52,11 +52,8 @@ impl Default for LockConfig {
 #[derive(Debug)]
 pub struct FileLock {
     path: PathBuf,
-    #[allow(dead_code)]
     lock_type: LockType,
-    #[allow(dead_code)]
     acquired_at: SystemTime,
-    #[allow(dead_code)]
     process_id: u32,
     _internal_lock: Box<dyn std::any::Any + Send>,
 }
@@ -65,6 +62,50 @@ impl Drop for FileLock {
     fn drop(&mut self) {
         // Automatic lock release - handled by internal lock implementation
         tracing::debug!("Releasing file lock for: {}", self.path.display());
+    }
+}
+
+impl FileLock {
+    /// Get the path of the locked file
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Get the type of lock (read or write)
+    pub fn lock_type(&self) -> LockType {
+        self.lock_type
+    }
+
+    /// Get the time when this lock was acquired
+    pub fn acquired_at(&self) -> SystemTime {
+        self.acquired_at
+    }
+
+    /// Get the process ID that owns this lock
+    pub fn process_id(&self) -> u32 {
+        self.process_id
+    }
+
+    /// Get the duration this lock has been held
+    pub fn duration_held(&self) -> Duration {
+        self.acquired_at.elapsed().unwrap_or_default()
+    }
+
+    /// Check if this lock is considered stale (held for too long)
+    pub fn is_stale(&self, timeout: Duration) -> bool {
+        self.duration_held() > timeout
+    }
+
+    /// Get lock information as a structured object
+    pub fn lock_info(&self) -> LockInfo {
+        LockInfo {
+            path: self.path.clone(),
+            lock_type: self.lock_type,
+            process_id: self.process_id,
+            thread_id: 0, // Placeholder - thread ID tracking not critical for functionality
+            acquired_at: self.acquired_at,
+            last_accessed: SystemTime::now(),
+        }
     }
 }
 
@@ -153,7 +194,7 @@ impl FileLockManager {
                 path.to_path_buf(),
                 LockInfo {
                     path: path.to_path_buf(),
-                    lock_type: config.lock_type.clone(),
+                    lock_type: config.lock_type,
                     process_id,
                     thread_id,
                     acquired_at,
@@ -346,14 +387,6 @@ impl FileLockManager {
     }
 
     // Helper methods
-    #[allow(dead_code)]
-    fn is_lock_compatible(&self, existing: &LockType, requested: &LockType) -> bool {
-        match (existing, requested) {
-            (LockType::Shared, LockType::Shared) => true,
-            (LockType::Shared, LockType::Exclusive) => false,
-            (LockType::Exclusive, _) => false,
-        }
-    }
 
     fn acquire_system_lock(
         &self,
@@ -393,7 +426,7 @@ impl FileLockManager {
                     return Err(SnpError::Lock(Box::new(LockError::Timeout {
                         path: path.to_path_buf(),
                         timeout: config.timeout,
-                        lock_type: config.lock_type.clone(),
+                        lock_type: config.lock_type,
                     })));
                 }
             }
@@ -415,7 +448,7 @@ impl FileLockManager {
                 SnpError::Lock(Box::new(LockError::AcquisitionFailed {
                     path: lock_path.to_path_buf(),
                     error: e.to_string(),
-                    lock_type: config.lock_type.clone(),
+                    lock_type: config.lock_type,
                 }))
             })?;
 
@@ -426,7 +459,7 @@ impl FileLockManager {
                     SnpError::Lock(Box::new(LockError::AcquisitionFailed {
                         path: lock_path.to_path_buf(),
                         error: e.to_string(),
-                        lock_type: config.lock_type.clone(),
+                        lock_type: config.lock_type,
                     }))
                 })?;
             }
@@ -554,7 +587,6 @@ impl LockOrdering {
 
 /// Stale lock detection
 pub struct StaleLockDetector {
-    #[allow(dead_code)]
     check_interval: Duration,
     stale_timeout: Duration,
 }
@@ -615,6 +647,39 @@ impl StaleLockDetector {
         } else {
             Ok(false)
         }
+    }
+
+    /// Get the configured check interval
+    pub fn check_interval(&self) -> Duration {
+        self.check_interval
+    }
+
+    /// Get the configured stale timeout
+    pub fn stale_timeout(&self) -> Duration {
+        self.stale_timeout
+    }
+
+    /// Run a periodic check cycle (would be called on a timer)
+    pub async fn run_check_cycle(&self, locks: &[LockInfo]) -> Vec<(usize, LockStatus)> {
+        let mut stale_locks = Vec::new();
+
+        for (index, lock_info) in locks.iter().enumerate() {
+            let status = self.check_lock_status(lock_info);
+            match status {
+                LockStatus::Stale { .. } | LockStatus::Abandoned { .. } => {
+                    tracing::warn!("Detected stale lock: {:?} -> {:?}", lock_info.path, status);
+                    stale_locks.push((index, status));
+                }
+                LockStatus::Active => {
+                    // Lock is healthy, no action needed
+                }
+            }
+        }
+
+        // Sleep for the configured check interval before next cycle
+        tokio::time::sleep(self.check_interval).await;
+
+        stale_locks
     }
 
     pub fn start_background_cleanup(&self) -> Result<()> {

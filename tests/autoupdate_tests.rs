@@ -7,7 +7,6 @@ use tempfile::TempDir;
 use tokio::fs;
 
 /// Test data structures for autoupdate functionality
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct MockRepository {
     url: String,
@@ -17,7 +16,6 @@ struct MockRepository {
     available_versions: Vec<MockVersion>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct MockVersion {
     rev: String,
@@ -37,13 +35,11 @@ async fn create_test_config(content: &str) -> Result<(TempDir, PathBuf)> {
 }
 
 /// Helper function to read config file content
-#[allow(dead_code)]
 async fn read_config_content(path: &Path) -> Result<String> {
     fs::read_to_string(path).await.map_err(SnpError::Io)
 }
 
 /// Helper to create mock git repository for testing
-#[allow(dead_code)]
 fn create_mock_repos() -> Vec<MockRepository> {
     vec![
         MockRepository {
@@ -1041,4 +1037,104 @@ async fn test_rate_limit_handling() {
     use snp::commands::autoupdate::RepositoryVersionResolver;
     let _resolver = RepositoryVersionResolver::new();
     // Resolver creation is sufficient test
+}
+
+// ===== MOCK DATA TESTS =====
+
+#[tokio::test]
+async fn test_mock_repository_version_comparison() {
+    // Test version comparison logic using mock data
+    let repos = create_mock_repos();
+
+    // Verify mock data structure
+    assert_eq!(repos.len(), 2);
+
+    let black_repo = &repos[0];
+    assert_eq!(black_repo.url, "https://github.com/psf/black");
+    assert_eq!(black_repo.current_rev, "22.3.0");
+    assert_eq!(black_repo.latest_rev, "23.1.0");
+    assert_eq!(black_repo.latest_tag, Some("23.1.0".to_string()));
+
+    let flake8_repo = &repos[1];
+    assert_eq!(flake8_repo.url, "https://github.com/pycqa/flake8");
+    assert_eq!(flake8_repo.current_rev, "5.0.4");
+    assert_eq!(flake8_repo.latest_rev, "6.0.0");
+
+    // Test version comparison logic
+    for repo in &repos {
+        assert_ne!(
+            repo.current_rev, repo.latest_rev,
+            "Mock data should have update available"
+        );
+
+        // Verify available versions are sorted chronologically
+        for versions in repo.available_versions.windows(2) {
+            assert!(versions[0].commit_date <= versions[1].commit_date);
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_mock_version_metadata_validation() {
+    // Test version metadata using mock data
+    let repos = create_mock_repos();
+
+    for repo in &repos {
+        for version in &repo.available_versions {
+            // Validate version structure
+            assert!(!version.rev.is_empty());
+
+            // If it has a tag, it should match the revision for stable releases
+            if let Some(ref tag) = version.tag {
+                if !version.is_prerelease {
+                    assert_eq!(&version.rev, tag);
+                }
+            }
+
+            // Prerelease flag should be consistent
+            if version.is_prerelease {
+                assert!(
+                    version.tag.is_none()
+                        || version.tag.as_ref().unwrap().contains("rc")
+                        || version.tag.as_ref().unwrap().contains("beta")
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_mock_repository_update_simulation() {
+    // Test repository update simulation using mock data
+    let repos = create_mock_repos();
+
+    for repo in &repos {
+        // Simulate update check
+        let needs_update = repo.current_rev != repo.latest_rev;
+        assert!(needs_update, "All mock repositories should need updates");
+
+        // Simulate version selection based on strategy
+        let latest_stable = repo
+            .available_versions
+            .iter()
+            .filter(|v| !v.is_prerelease)
+            .max_by_key(|v| &v.commit_date);
+
+        assert!(
+            latest_stable.is_some(),
+            "Should have at least one stable version"
+        );
+
+        let latest_any = repo
+            .available_versions
+            .iter()
+            .max_by_key(|v| &v.commit_date);
+
+        assert!(latest_any.is_some(), "Should have at least one version");
+
+        // Test that latest stable is not newer than latest any
+        if let (Some(stable), Some(any)) = (latest_stable, latest_any) {
+            assert!(stable.commit_date <= any.commit_date);
+        }
+    }
 }

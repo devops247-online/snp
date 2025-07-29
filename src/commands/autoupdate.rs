@@ -1042,9 +1042,7 @@ impl RepositoryVersionResolver {
 
 /// Configuration updater for YAML files
 pub struct ConfigurationUpdater {
-    #[allow(dead_code)]
     preserve_formatting: bool,
-    #[allow(dead_code)]
     create_backups: bool,
 }
 
@@ -1067,6 +1065,11 @@ impl ConfigurationUpdater {
             "Updating repository {} to version {}",
             repo_url, new_version.revision
         );
+
+        // Create backup if enabled
+        if self.create_backups {
+            self.create_backup(config_path).await?;
+        }
 
         // Read current configuration
         let content = tokio::fs::read_to_string(config_path)
@@ -1130,35 +1133,73 @@ impl ConfigurationUpdater {
         })
     }
 
-    /// Update YAML content preserving formatting
+    /// Update YAML content with optional formatting preservation
     fn update_yaml_content(&self, content: &str, repo_url: &str, new_rev: &str) -> Result<String> {
-        // This is a simplified implementation
-        // TODO: Implement proper YAML formatting preservation using regex like Python pre-commit
+        if self.preserve_formatting {
+            // Preserve original formatting by updating line-by-line
+            let lines: Vec<&str> = content.lines().collect();
+            let mut updated_lines = Vec::new();
+            let mut in_target_repo = false;
 
-        let lines: Vec<&str> = content.lines().collect();
-        let mut updated_lines = Vec::new();
-        let mut in_target_repo = false;
-
-        for line in lines {
-            if line.trim_start().starts_with("- repo:") && line.contains(repo_url) {
-                in_target_repo = true;
-                updated_lines.push(line.to_string());
-            } else if in_target_repo && line.trim_start().starts_with("rev:") {
-                // Replace the revision while preserving indentation and formatting
-                let indent = line.len() - line.trim_start().len();
-                let spaces = " ".repeat(indent);
-                updated_lines.push(format!("{spaces}rev: {new_rev}"));
-                in_target_repo = false;
-            } else if in_target_repo && line.trim_start().starts_with("- repo:") {
-                // We've moved to the next repository
-                in_target_repo = false;
-                updated_lines.push(line.to_string());
-            } else {
-                updated_lines.push(line.to_string());
+            for line in lines {
+                if line.trim_start().starts_with("- repo:") && line.contains(repo_url) {
+                    in_target_repo = true;
+                    updated_lines.push(line.to_string());
+                } else if in_target_repo && line.trim_start().starts_with("rev:") {
+                    // Replace the revision while preserving indentation and formatting
+                    let indent = line.len() - line.trim_start().len();
+                    let spaces = " ".repeat(indent);
+                    updated_lines.push(format!("{spaces}rev: {new_rev}"));
+                    in_target_repo = false;
+                } else if in_target_repo && line.trim_start().starts_with("- repo:") {
+                    // We've moved to the next repository
+                    in_target_repo = false;
+                    updated_lines.push(line.to_string());
+                } else {
+                    updated_lines.push(line.to_string());
+                }
             }
-        }
 
-        Ok(updated_lines.join("\n"))
+            Ok(updated_lines.join("\n"))
+        } else {
+            // Parse and rewrite YAML, which may change formatting
+            let mut config: serde_yaml::Value = serde_yaml::from_str(content).map_err(|e| {
+                SnpError::Config(Box::new(crate::error::ConfigError::InvalidYaml {
+                    message: e.to_string(),
+                    file_path: None,
+                    line: e.location().map(|l| l.line() as u32),
+                    column: e.location().map(|l| l.column() as u32),
+                }))
+            })?;
+
+            // Update the revision in the parsed YAML
+            if let Some(repos) = config.get_mut("repos").and_then(|r| r.as_sequence_mut()) {
+                for repo in repos {
+                    if let Some(repo_map) = repo.as_mapping_mut() {
+                        let repo_key = serde_yaml::Value::String("repo".to_string());
+                        if let Some(repo_value) = repo_map.get(&repo_key) {
+                            if repo_value.as_str() == Some(repo_url) {
+                                repo_map.insert(
+                                    serde_yaml::Value::String("rev".to_string()),
+                                    serde_yaml::Value::String(new_rev.to_string()),
+                                );
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Serialize back to YAML
+            serde_yaml::to_string(&config).map_err(|e| {
+                SnpError::Config(Box::new(crate::error::ConfigError::InvalidYaml {
+                    message: format!("Failed to serialize updated config: {e}"),
+                    file_path: None,
+                    line: None,
+                    column: None,
+                }))
+            })
+        }
     }
 
     /// Update all repositories in configuration
@@ -1207,6 +1248,16 @@ impl ConfigurationUpdater {
             errors,
             total_processed: updates.len(),
         })
+    }
+
+    /// Create a backup of the configuration file
+    async fn create_backup(&self, config_path: &Path) -> Result<()> {
+        let backup_path = config_path.with_extension("yaml.backup");
+        tokio::fs::copy(config_path, &backup_path)
+            .await
+            .map_err(SnpError::Io)?;
+        debug!("Created backup at {}", backup_path.display());
+        Ok(())
     }
 }
 

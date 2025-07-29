@@ -83,8 +83,33 @@ pub enum OsType {
 
 /// System dependency manager (mostly a no-op since system commands are already installed)
 pub struct SystemDependencyManager {
-    #[allow(dead_code)]
     config: DependencyManagerConfig,
+}
+
+impl SystemDependencyManager {
+    pub fn new() -> Self {
+        Self {
+            config: DependencyManagerConfig::default(),
+        }
+    }
+
+    pub fn with_config(config: DependencyManagerConfig) -> Self {
+        Self { config }
+    }
+
+    pub fn get_timeout(&self) -> std::time::Duration {
+        self.config.timeout
+    }
+
+    pub fn is_offline_mode(&self) -> bool {
+        self.config.offline_mode
+    }
+}
+
+impl Default for SystemDependencyManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Default for SystemLanguagePlugin {
@@ -99,9 +124,7 @@ impl SystemLanguagePlugin {
             config: SystemLanguageConfig::default(),
             executable_cache: HashMap::new(),
             shell_detection_cache: None,
-            dependency_manager: SystemDependencyManager {
-                config: DependencyManagerConfig::default(),
-            },
+            dependency_manager: SystemDependencyManager::new(),
         }
     }
 
@@ -110,9 +133,7 @@ impl SystemLanguagePlugin {
             config,
             executable_cache: HashMap::new(),
             shell_detection_cache: None,
-            dependency_manager: SystemDependencyManager {
-                config: DependencyManagerConfig::default(),
-            },
+            dependency_manager: SystemDependencyManager::new(),
         }
     }
 
@@ -828,15 +849,31 @@ impl Language for SystemLanguagePlugin {
 impl DependencyManager for SystemDependencyManager {
     async fn install(
         &self,
-        _dependencies: &[Dependency],
+        dependencies: &[Dependency],
         _env: &LanguageEnvironment,
     ) -> Result<super::dependency::InstallationResult> {
+        let start_time = std::time::Instant::now();
+        let mut skipped = vec![];
+
         // System dependencies are not installed by this manager
+        // They are assumed to be already available on the system
+        // However, we can use config settings for logging or validation
+
+        if self.config.offline_mode {
+            for dep in dependencies {
+                skipped.push(dep.clone()); // Skip the entire dependency, not just the name
+            }
+        } else {
+            for dep in dependencies {
+                skipped.push(dep.clone()); // System dependencies are skipped
+            }
+        }
+
         Ok(super::dependency::InstallationResult {
             installed: vec![],
             failed: vec![],
-            skipped: vec![],
-            duration: Duration::from_millis(0),
+            skipped,
+            duration: start_time.elapsed(),
         })
     }
 

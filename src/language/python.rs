@@ -24,6 +24,19 @@ use super::environment::{
     EnvironmentConfig, EnvironmentInfo, LanguageEnvironment, ValidationReport,
 };
 use super::traits::{Command, Language, LanguageConfig, LanguageError};
+use thiserror::Error;
+
+/// Python-specific error types
+#[derive(Debug, Error)]
+pub enum PythonError {
+    #[error("Environment creation failed: {env_type} at {path:?}: {error}")]
+    EnvironmentCreationFailed {
+        env_type: String,
+        path: PathBuf,
+        error: String,
+        recovery_suggestion: Option<String>,
+    },
+}
 
 /// Global coordination for repository installations to prevent concurrent installs
 /// Key: "env_path:repo_path", Value: Mutex for that specific installation
@@ -95,8 +108,6 @@ pub struct PythonEnvironment {
 #[derive(Clone)]
 pub struct PythonDependencyManager {
     config: PipConfig,
-    #[allow(dead_code)] // Will be used for caching pip metadata in future
-    pip_cache: HashMap<PathBuf, PipInfo>,
 }
 
 #[derive(Debug, Clone)]
@@ -473,9 +484,17 @@ impl PythonLanguagePlugin {
                     .await
             }
             VenvBackend::Auto => {
-                // Try venv first, fallback to virtualenv
+                // Try venv first, fallback to virtualenv, then legacy venv
                 if python_info.supports_venv {
-                    self.create_venv_environment(python_info, &env_path).await
+                    match self.create_venv_environment(python_info, &env_path).await {
+                        Ok(path) => Ok(path),
+                        Err(_) => {
+                            // Fallback to legacy venv method as a last resort
+                            tracing::debug!("Main venv creation failed, trying legacy method");
+                            self.create_venv_environment_legacy(python_info, &env_path)
+                                .await
+                        }
+                    }
                 } else if which::which("virtualenv").is_ok() {
                     self.create_virtualenv_environment(python_info, &env_path)
                         .await
@@ -494,6 +513,33 @@ impl PythonLanguagePlugin {
 
     /// Create virtual environment using python -m venv
     async fn create_venv_environment(
+        &self,
+        python_info: &PythonInfo,
+        env_path: &Path,
+    ) -> Result<PathBuf> {
+        // Use the centralized venv creation method
+        self.dependency_manager
+            .create_python_venv(python_info, env_path)
+            .await?;
+
+        // Verify the environment was created successfully
+        if !self
+            .dependency_manager
+            .is_valid_environment(env_path)
+            .await
+            .unwrap_or(false)
+        {
+            return Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
+                language: "python".to_string(),
+                error: "Created environment is not valid".to_string(),
+                recovery_suggestion: Some("Check Python installation and permissions".to_string()),
+            }));
+        }
+
+        Ok(env_path.to_path_buf())
+    }
+
+    async fn create_venv_environment_legacy(
         &self,
         python_info: &PythonInfo,
         env_path: &Path,
@@ -707,11 +753,21 @@ impl PythonLanguagePlugin {
     }
 
     /// Get the PATH environment variable for the virtual environment
-    #[allow(dead_code)]
     fn get_venv_path(&self, env_path: &Path) -> Result<String> {
-        let venv_bin = env_path.join("bin");
+        let venv_bin = if cfg!(windows) {
+            env_path.join("Scripts")
+        } else {
+            env_path.join("bin")
+        };
+
         let current_path = std::env::var("PATH").unwrap_or_default();
-        Ok(format!("{}:{current_path}", venv_bin.display()))
+        let path_sep = if cfg!(windows) { ";" } else { ":" };
+        Ok(format!(
+            "{}{}{}",
+            venv_bin.display(),
+            path_sep,
+            current_path
+        ))
     }
 
     /// Validate existing virtual environment (internal method)
@@ -790,12 +846,22 @@ impl PythonLanguagePlugin {
             env_path.join("bin")
         };
 
-        if let Ok(current_path) = std::env::var("PATH") {
-            let path_sep = if cfg!(windows) { ";" } else { ":" };
-            let new_path = format!("{}{}{}", bin_dir.to_string_lossy(), path_sep, current_path);
-            env_vars.insert("PATH".to_string(), new_path);
-        } else {
-            env_vars.insert("PATH".to_string(), bin_dir.to_string_lossy().to_string());
+        // Use the centralized PATH construction method
+        match self.get_venv_path(env_path) {
+            Ok(venv_path) => {
+                env_vars.insert("PATH".to_string(), venv_path);
+            }
+            Err(_) => {
+                // Fallback to manual construction
+                if let Ok(current_path) = std::env::var("PATH") {
+                    let path_sep = if cfg!(windows) { ";" } else { ":" };
+                    let new_path =
+                        format!("{}{}{}", bin_dir.to_string_lossy(), path_sep, current_path);
+                    env_vars.insert("PATH".to_string(), new_path);
+                } else {
+                    env_vars.insert("PATH".to_string(), bin_dir.to_string_lossy().to_string());
+                }
+            }
         }
 
         Ok(env_vars)
@@ -1027,68 +1093,6 @@ impl PythonLanguagePlugin {
         Ok(true)
     }
 
-    /// Get package name from repository setup.py or pyproject.toml
-    #[allow(dead_code)]
-    async fn get_package_name_from_repository(&self, repo_path: &Path) -> Result<String> {
-        // Try pyproject.toml first
-        let pyproject_path = repo_path.join("pyproject.toml");
-        if pyproject_path.exists() {
-            if let Ok(content) = fs::read_to_string(&pyproject_path).await {
-                // Simple parsing - look for name = "package-name" in [project] section
-                for line in content.lines() {
-                    let line = line.trim();
-                    if line.starts_with("name") && line.contains('=') {
-                        if let Some(name_part) = line.split('=').nth(1) {
-                            let name = name_part.trim().trim_matches('"').trim_matches('\'');
-                            if !name.is_empty() {
-                                return Ok(name.to_string());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Try setup.py
-        let setup_py_path = repo_path.join("setup.py");
-        if setup_py_path.exists() {
-            if let Ok(content) = fs::read_to_string(&setup_py_path).await {
-                // Simple parsing - look for name="package-name" or name='package-name'
-                for line in content.lines() {
-                    let line = line.trim();
-                    if line.contains("name") && line.contains('=') {
-                        // Extract name from setup(name="package-name", ...)
-                        if let Some(start) = line.find("name") {
-                            let after_name = &line[start..];
-                            if let Some(eq_pos) = after_name.find('=') {
-                                let after_eq = &after_name[eq_pos + 1..].trim();
-                                if let Some(quote_start) =
-                                    after_eq.find('"').or_else(|| after_eq.find('\''))
-                                {
-                                    let quote_char = after_eq.chars().nth(quote_start).unwrap();
-                                    let quoted_part = &after_eq[quote_start + 1..];
-                                    if let Some(quote_end) = quoted_part.find(quote_char) {
-                                        let name = &quoted_part[..quote_end];
-                                        if !name.is_empty() {
-                                            return Ok(name.to_string());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Fallback: use directory name
-        Ok(repo_path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string())
-    }
-
     /// Get the most recent modification time of important files in the repository
     async fn get_repository_modified_time(
         &self,
@@ -1225,7 +1229,6 @@ impl PythonDependencyManager {
     pub fn new() -> Self {
         Self {
             config: PipConfig::default(),
-            pip_cache: HashMap::new(),
         }
     }
 
@@ -1353,7 +1356,6 @@ impl PythonDependencyManager {
     }
 
     /// Create a Python virtual environment in the specified directory
-    #[allow(dead_code)]
     async fn create_python_venv(&self, python_info: &PythonInfo, env_path: &Path) -> Result<()> {
         // If environment already exists and is valid, return success
         if env_path.exists() && self.is_valid_environment(env_path).await.unwrap_or(false) {
@@ -1386,7 +1388,6 @@ impl PythonDependencyManager {
     }
 
     /// Check if a Python environment is valid
-    #[allow(dead_code)]
     async fn is_valid_environment(&self, env_path: &Path) -> Result<bool> {
         let python_exe = if cfg!(windows) {
             env_path.join("Scripts").join("python.exe")

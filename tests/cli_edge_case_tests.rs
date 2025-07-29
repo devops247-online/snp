@@ -651,6 +651,8 @@ mod cli_edge_case_tests {
             no_cache: false,
             cache_l1_size: None,
             cache_l2_size: None,
+            event_verbose: false,
+            no_events: false,
         };
 
         // The actual runtime validation would happen in cli.run()

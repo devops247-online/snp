@@ -121,7 +121,6 @@ pub struct FileFilter {
 #[derive(Debug)]
 pub struct GitDiff {
     stats: DiffStats,
-    #[allow(dead_code)]
     config: DiffConfig,
     patch_content: String,
 }
@@ -184,9 +183,7 @@ pub enum DiffLineType {
 pub struct GitRepository {
     repo: Repository,
     root_path: PathBuf,
-    #[allow(dead_code)]
     config: GitConfig,
-    #[allow(dead_code)]
     index_cache: Option<IndexCache>,
     file_cache: std::sync::Mutex<HashMap<String, (Vec<PathBuf>, SystemTime)>>,
 }
@@ -293,6 +290,38 @@ impl GitRepository {
     /// Check if this is a bare repository
     pub fn is_bare(&self) -> bool {
         self.repo.is_bare()
+    }
+
+    /// Get the repository configuration
+    pub fn config(&self) -> &GitConfig {
+        &self.config
+    }
+
+    /// Get cached file status if available and valid
+    pub fn get_cached_file_status(&self, path: &Path) -> Option<CachedFileStatus> {
+        if let Some(ref cache) = self.index_cache {
+            if let Some(cached_status) = cache.get_status(path) {
+                // Check if cache is still valid
+                if cached_status.mtime.elapsed().unwrap_or(Duration::MAX) < cache.cache_ttl {
+                    return Some(cached_status.clone());
+                }
+            }
+        }
+        None
+    }
+
+    /// Update the index cache with file status information
+    pub fn update_file_status_cache(&mut self, path: PathBuf, status: CachedFileStatus) {
+        if let Some(ref mut cache) = self.index_cache {
+            cache.update_status(path, status);
+        }
+    }
+
+    /// Invalidate cached status for a specific file
+    pub fn invalidate_file_cache(&mut self, path: &Path) {
+        if let Some(ref mut cache) = self.index_cache {
+            cache.invalidate(path);
+        }
     }
 
     /// Get the head commit OID
@@ -1505,6 +1534,10 @@ impl FileFilter {
 impl GitDiff {
     pub fn stats(&self) -> &DiffStats {
         &self.stats
+    }
+
+    pub fn config(&self) -> &DiffConfig {
+        &self.config
     }
 
     pub fn format_patch(&self) -> Result<String> {

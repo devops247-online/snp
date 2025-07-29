@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::error::{ConfigError, Result, SnpError};
+use crate::events::EventConfig;
 use crate::file_change_detector::FileChangeDetectorConfig;
 use crate::storage::Store;
 
@@ -20,6 +21,7 @@ pub struct Config {
     pub minimum_pre_commit_version: Option<String>,
     pub ci: Option<serde_yaml::Value>,
     pub incremental: Option<IncrementalConfig>,
+    pub events: Option<EventConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
