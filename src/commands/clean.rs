@@ -595,7 +595,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_analyzer_creation() {
-        let store = Store::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let store = Store::with_cache_directory(temp_dir.path().to_path_buf()).unwrap();
         let _analyzer = CacheAnalyzer::new(store);
 
         // Just test that we can create the analyzer
@@ -604,7 +605,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_manager_creation() {
-        let store = Store::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let store = Store::with_cache_directory(temp_dir.path().to_path_buf()).unwrap();
         let _manager = CleanupManager::new(store);
 
         // Just test that we can create the manager
@@ -612,7 +614,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_find_old_repositories_empty() {
-        let store = Store::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let store = Store::with_cache_directory(temp_dir.path().to_path_buf()).unwrap();
         let analyzer = CacheAnalyzer::new(store);
 
         let max_age = Duration::from_secs(3600);
@@ -626,7 +629,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_find_old_environments_empty() {
-        let store = Store::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let store = Store::with_cache_directory(temp_dir.path().to_path_buf()).unwrap();
         let analyzer = CacheAnalyzer::new(store);
 
         let max_age = Duration::from_secs(3600);
@@ -637,7 +641,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_find_orphaned_environments() {
-        let store = Store::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let store = Store::with_cache_directory(temp_dir.path().to_path_buf()).unwrap();
         let analyzer = CacheAnalyzer::new(store);
 
         let result = analyzer.find_orphaned_environments().await;
@@ -646,7 +651,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_cleanup_dry_run() {
-        let store = Store::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let store = Store::with_cache_directory(temp_dir.path().to_path_buf()).unwrap();
         let manager = CleanupManager::new(store);
 
         let config = CleanConfig {
@@ -668,7 +674,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_cleanup_single_operation() {
-        let store = Store::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let store = Store::with_cache_directory(temp_dir.path().to_path_buf()).unwrap();
         let manager = CleanupManager::new(store);
 
         // Test repos only
@@ -689,7 +696,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_gc_normal() {
-        let store = Store::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let store = Store::with_cache_directory(temp_dir.path().to_path_buf()).unwrap();
         let manager = CleanupManager::new(store);
 
         let config = GcConfig {
@@ -705,7 +713,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_gc_aggressive() {
-        let store = Store::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let store = Store::with_cache_directory(temp_dir.path().to_path_buf()).unwrap();
         let manager = CleanupManager::new(store);
 
         let config = GcConfig {
@@ -724,7 +733,8 @@ mod tests {
         let _temp_dir = TempDir::new().unwrap();
 
         // Create a mock store pointing to temp directory
-        let store = Store::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let store = Store::with_cache_directory(temp_dir.path().to_path_buf()).unwrap();
         let manager = CleanupManager::new(store);
 
         let config = CleanConfig {
@@ -746,7 +756,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_clean_temp_files_with_age_filter() {
-        let store = Store::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let store = Store::with_cache_directory(temp_dir.path().to_path_buf()).unwrap();
         let manager = CleanupManager::new(store);
 
         let config = CleanConfig {
@@ -842,7 +853,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_with_no_flags_cleans_all() {
-        let store = Store::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let store = Store::with_cache_directory(temp_dir.path().to_path_buf()).unwrap();
         let manager = CleanupManager::new(store);
 
         // When no specific flags are set, should clean all types
@@ -876,7 +888,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_analyze_cache_basic() {
-        let store = Store::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let store = Store::with_cache_directory(temp_dir.path().to_path_buf()).unwrap();
         let analyzer = CacheAnalyzer::new(store);
 
         let result = analyzer.analyze_cache().await;
@@ -896,7 +909,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_calculate_cache_size() {
-        let store = Store::new().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let store = Store::with_cache_directory(temp_dir.path().to_path_buf()).unwrap();
         let manager = CleanupManager::new(store);
 
         let result = manager.calculate_cache_size().await;

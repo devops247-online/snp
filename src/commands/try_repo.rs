@@ -447,6 +447,20 @@ fn is_valid_repository_url(url: &str) -> bool {
 
     // SSH URLs (git@host:repo format)
     if url.contains('@') && url.contains(':') {
+        // Must have content before @ (username)
+        let at_pos = url.find('@').unwrap();
+        if at_pos == 0 {
+            return false;
+        }
+        // Must have content after : (repository path)
+        let colon_pos = url.rfind(':').unwrap();
+        if colon_pos == url.len() - 1 {
+            return false;
+        }
+        // Must have content between @ and : (hostname)
+        if colon_pos <= at_pos + 1 {
+            return false;
+        }
         return true;
     }
 
@@ -642,7 +656,7 @@ mod tests {
   name: Test Hook
   entry: echo test
   language: system
-  files: "\.py$"
+  files: "\\.py$"
   stages: [pre-commit]
   args: ["--check"]
 "#;
@@ -732,14 +746,14 @@ mod tests {
     #[tokio::test]
     async fn test_load_repository_hooks_with_all_fields() {
         let temp_dir = TempDir::new().unwrap();
-        let _hooks_file = temp_dir.path().join(".pre-commit-hooks.yaml");
+        let hooks_file = temp_dir.path().join(".pre-commit-hooks.yaml");
 
         let hooks_content = r#"
 - id: comprehensive-hook
   name: Comprehensive Hook
   entry: echo test
   language: python
-  files: "\.py$"
+  files: "\\.py$"
   exclude: "__pycache__"
   types: [python]
   exclude_types: [markdown]
@@ -753,7 +767,7 @@ mod tests {
   minimum_pre_commit_version: "2.0.0"
   depends_on: ["other-hook"]
 "#;
-        fs::write(hooks_content, hooks_content).unwrap();
+        fs::write(&hooks_file, hooks_content).unwrap();
 
         let result = load_repository_hooks(temp_dir.path(), None).await;
         assert!(result.is_ok());
@@ -790,10 +804,10 @@ mod tests {
     #[tokio::test]
     async fn test_determine_files_to_process_specific_files() {
         let temp_dir = TempDir::new().unwrap();
-        let git_repo = GitRepository::open(temp_dir.path()).unwrap_or_else(|_| {
-            // Create a mock for testing
-            GitRepository::open(".").unwrap()
-        });
+
+        // Initialize a git repo in the temp directory
+        git2::Repository::init(temp_dir.path()).unwrap();
+        let git_repo = GitRepository::open(temp_dir.path()).unwrap();
 
         let config = TryRepoConfig {
             repository_url: "test".to_string(),
