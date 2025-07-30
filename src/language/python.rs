@@ -1820,7 +1820,6 @@ impl Language for PythonLanguagePlugin {
             files_modified
         );
 
-
         Ok(HookExecutionResult {
             hook_id: hook.id.clone(),
             success: output.status.success(),

@@ -648,7 +648,6 @@ impl HookExecutionEngine {
         let duration = start_time.elapsed().unwrap_or(Duration::new(0, 0));
         hook_result.duration = duration;
 
-
         // Emit completion or failure event based on result
         if hook_result.success {
             // Create EventHookExecutionResult for the event
