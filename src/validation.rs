@@ -1237,6 +1237,440 @@ mod tests {
         let migrations = validator.suggest_migrations(&config);
         assert!(migrations.is_empty()); // No migrations needed for simple config
     }
+
+    #[test]
+    fn test_validation_config_creation() {
+        let config = ValidationConfig {
+            strict_mode: true,
+            allow_deprecated: false,
+            check_performance_impact: true,
+            validate_file_existence: true,
+            max_hooks_per_repo: Some(50),
+        };
+
+        assert!(config.strict_mode);
+        assert!(!config.allow_deprecated);
+        assert!(config.check_performance_impact);
+        assert!(config.validate_file_existence);
+        assert_eq!(config.max_hooks_per_repo, Some(50));
+
+        let default_config = ValidationConfig::default();
+        assert!(!default_config.strict_mode);
+        assert!(default_config.allow_deprecated);
+        assert!(default_config.check_performance_impact);
+        assert!(!default_config.validate_file_existence);
+        assert_eq!(default_config.max_hooks_per_repo, Some(100));
+    }
+
+    #[test]
+    fn test_validation_result_operations() {
+        let mut result = ValidationResult::new();
+        assert!(result.is_valid);
+        assert!(result.errors.is_empty());
+        assert!(result.warnings.is_empty());
+
+        // Add error
+        result.add_error(ValidationError::new(
+            ValidationErrorType::MissingRequiredField,
+            "Test error",
+            "test.field",
+        ));
+        assert!(!result.is_valid);
+        assert_eq!(result.errors.len(), 1);
+
+        // Add warning
+        result.add_warning(ValidationWarning {
+            message: "Test warning".to_string(),
+            field_path: "test.warning".to_string(),
+            suggestion: Some("Fix it".to_string()),
+            warning_type: WarningType::PerformanceImpact,
+        });
+        assert_eq!(result.warnings.len(), 1);
+
+        // Test merge
+        let mut other_result = ValidationResult::new();
+        other_result.add_error(ValidationError::new(
+            ValidationErrorType::InvalidFormat,
+            "Another error",
+            "another.field",
+        ));
+
+        result.merge(other_result);
+        assert!(!result.is_valid);
+        assert_eq!(result.errors.len(), 2);
+    }
+
+    #[test]
+    fn test_performance_metrics() {
+        let mut metrics = PerformanceMetrics::default();
+        assert_eq!(metrics.total_hooks, 0);
+        assert_eq!(metrics.estimated_file_count, 0);
+        assert_eq!(metrics.regex_complexity_score, 0.0);
+        assert!(metrics.potential_bottlenecks.is_empty());
+
+        let other_metrics = PerformanceMetrics {
+            total_hooks: 5,
+            estimated_file_count: 100,
+            regex_complexity_score: 2.5,
+            potential_bottlenecks: vec![PerformanceWarning {
+                hook_id: "test".to_string(),
+                issue: PerformanceIssue::TooManyFiles { count: 1000 },
+                impact: PerformanceImpact::High,
+                suggestion: "Reduce file count".to_string(),
+            }],
+        };
+
+        metrics.merge(other_metrics);
+        assert_eq!(metrics.total_hooks, 5);
+        assert_eq!(metrics.estimated_file_count, 100);
+        assert_eq!(metrics.regex_complexity_score, 2.5);
+        assert_eq!(metrics.potential_bottlenecks.len(), 1);
+    }
+
+    #[test]
+    fn test_validation_error_types() {
+        let error = ValidationError::new(
+            ValidationErrorType::PerformanceImpact,
+            "Performance issue",
+            "hook.performance",
+        )
+        .with_suggestion("Optimize hook")
+        .with_location(15, 25)
+        .with_severity(ErrorSeverity::Warning);
+
+        assert!(matches!(
+            error.error_type,
+            ValidationErrorType::PerformanceImpact
+        ));
+        assert_eq!(error.message, "Performance issue");
+        assert_eq!(error.field_path, "hook.performance");
+        assert_eq!(error.suggestion, Some("Optimize hook".to_string()));
+        assert_eq!(error.line_number, Some(15));
+        assert_eq!(error.column_number, Some(25));
+        assert_eq!(error.severity, ErrorSeverity::Warning);
+    }
+
+    #[test]
+    fn test_warning_types() {
+        let warning = ValidationWarning {
+            message: "Deprecated field used".to_string(),
+            field_path: "deprecated.field".to_string(),
+            suggestion: Some("Use new field".to_string()),
+            warning_type: WarningType::DeprecatedField,
+        };
+
+        assert_eq!(warning.message, "Deprecated field used");
+        assert!(matches!(warning.warning_type, WarningType::DeprecatedField));
+        assert!(warning.suggestion.is_some());
+    }
+
+    #[test]
+    fn test_performance_issues() {
+        let file_issue = PerformanceIssue::TooManyFiles { count: 5000 };
+        let regex_issue = PerformanceIssue::ComplexRegex {
+            pattern: "(.*)*(.*)*".to_string(),
+        };
+        let time_issue = PerformanceIssue::ExpensiveHook {
+            estimated_time: std::time::Duration::from_secs(30),
+        };
+        let freq_issue = PerformanceIssue::FrequentExecution { stage_count: 10 };
+
+        // Test pattern matching
+        assert!(matches!(file_issue, PerformanceIssue::TooManyFiles { .. }));
+        assert!(matches!(regex_issue, PerformanceIssue::ComplexRegex { .. }));
+        assert!(matches!(time_issue, PerformanceIssue::ExpensiveHook { .. }));
+        assert!(matches!(
+            freq_issue,
+            PerformanceIssue::FrequentExecution { .. }
+        ));
+    }
+
+    #[test]
+    fn test_performance_impact_ordering() {
+        assert!(PerformanceImpact::Critical > PerformanceImpact::High);
+        assert!(PerformanceImpact::High > PerformanceImpact::Medium);
+        assert!(PerformanceImpact::Medium > PerformanceImpact::Low);
+    }
+
+    #[test]
+    fn test_schema_validator_with_custom_languages() {
+        let validator = SchemaValidator::new(ValidationConfig::default())
+            .with_supported_languages(vec!["custom".to_string(), "special".to_string()]);
+
+        // Test that custom language is now supported
+        let hook = Hook {
+            id: "custom-hook".to_string(),
+            name: None,
+            entry: "custom-command".to_string(),
+            language: "custom".to_string(),
+            files: None,
+            exclude: None,
+            types: None,
+            exclude_types: None,
+            additional_dependencies: None,
+            args: None,
+            always_run: None,
+            fail_fast: None,
+            pass_filenames: None,
+            stages: Some(vec!["pre-commit".to_string()]),
+            verbose: None,
+            depends_on: None,
+        };
+
+        let mut validator_mut = validator;
+        let result = validator_mut.validate_hook(&hook, 0);
+        assert!(result.is_valid);
+        // Should not have warnings about unknown language
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_hook_validation_edge_cases() {
+        let mut validator = SchemaValidator::new(ValidationConfig::default());
+
+        // Test hook with empty stages
+        let empty_stages_hook = Hook {
+            id: "test".to_string(),
+            name: None,
+            entry: "test".to_string(),
+            language: "system".to_string(),
+            files: None,
+            exclude: None,
+            types: None,
+            exclude_types: None,
+            additional_dependencies: None,
+            args: None,
+            always_run: None,
+            fail_fast: None,
+            pass_filenames: None,
+            stages: Some(vec![]), // Empty stages
+            verbose: None,
+            depends_on: None,
+        };
+
+        let result = validator.validate_hook(&empty_stages_hook, 0);
+        assert!(!result.is_valid);
+        assert!(!result.errors.is_empty());
+
+        // Test hook with invalid stage
+        let invalid_stage_hook = Hook {
+            id: "test".to_string(),
+            name: None,
+            entry: "test".to_string(),
+            language: "system".to_string(),
+            files: None,
+            exclude: None,
+            types: None,
+            exclude_types: None,
+            additional_dependencies: None,
+            args: None,
+            always_run: None,
+            fail_fast: None,
+            pass_filenames: None,
+            stages: Some(vec!["invalid-stage".to_string()]),
+            verbose: None,
+            depends_on: None,
+        };
+
+        let result = validator.validate_hook(&invalid_stage_hook, 0);
+        assert!(!result.is_valid);
+        assert!(!result.errors.is_empty());
+    }
+
+    #[test]
+    fn test_repository_validation_edge_cases() {
+        let mut validator = SchemaValidator::new(ValidationConfig::default());
+
+        // Test repository with no hooks
+        let no_hooks_repo = Repository {
+            repo: "https://github.com/test/repo".to_string(),
+            rev: Some("main".to_string()),
+            hooks: vec![], // No hooks
+        };
+
+        let result = validator.validate_repository_detailed(&no_hooks_repo, 0);
+        assert!(!result.is_valid);
+        assert!(!result.errors.is_empty());
+
+        // Test repository with empty URL
+        let empty_url_repo = Repository {
+            repo: "".to_string(), // Empty URL
+            rev: Some("main".to_string()),
+            hooks: vec![Hook {
+                id: "test".to_string(),
+                name: None,
+                entry: "test".to_string(),
+                language: "system".to_string(),
+                files: None,
+                exclude: None,
+                types: None,
+                exclude_types: None,
+                additional_dependencies: None,
+                args: None,
+                always_run: None,
+                fail_fast: None,
+                pass_filenames: None,
+                stages: Some(vec!["pre-commit".to_string()]),
+                verbose: None,
+                depends_on: None,
+            }],
+        };
+
+        let result = validator.validate_repository_detailed(&empty_url_repo, 0);
+        assert!(!result.is_valid);
+        assert!(!result.errors.is_empty());
+
+        // Test non-local repo without revision
+        let no_rev_repo = Repository {
+            repo: "https://github.com/test/repo".to_string(),
+            rev: None, // Missing revision
+            hooks: vec![Hook {
+                id: "test".to_string(),
+                name: None,
+                entry: "test".to_string(),
+                language: "system".to_string(),
+                files: None,
+                exclude: None,
+                types: None,
+                exclude_types: None,
+                additional_dependencies: None,
+                args: None,
+                always_run: None,
+                fail_fast: None,
+                pass_filenames: None,
+                stages: Some(vec!["pre-commit".to_string()]),
+                verbose: None,
+                depends_on: None,
+            }],
+        };
+
+        let result = validator.validate_repository_detailed(&no_rev_repo, 0);
+        assert!(!result.is_valid);
+        assert!(!result.errors.is_empty());
+    }
+
+    #[test]
+    fn test_global_settings_validation() {
+        let mut validator = SchemaValidator::new(ValidationConfig::default());
+
+        // Test config with invalid global regex
+        let invalid_config = Config {
+            repos: vec![],
+            default_install_hook_types: Some(vec!["invalid-hook-type".to_string()]),
+            default_language_version: Some(std::collections::HashMap::from([
+                ("python".to_string(), "".to_string()), // Empty version
+                ("unknown-lang".to_string(), "1.0".to_string()),
+            ])),
+            default_stages: Some(vec!["invalid-stage".to_string()]),
+            files: Some("[invalid-regex".to_string()),
+            exclude: Some("*invalid*regex*".to_string()),
+            fail_fast: None,
+            minimum_pre_commit_version: None,
+            ci: None,
+            incremental: None,
+            events: None,
+        };
+
+        let result = validator.validate_config(&invalid_config);
+        assert!(!result.is_valid);
+        assert!(!result.errors.is_empty());
+        assert!(!result.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_manifest_validation() {
+        // Test valid manifest content
+        let valid_manifest = r#"
+- id: test-hook
+  name: Test Hook
+  entry: test-command
+  language: system
+  files: \.py$
+  stages: [pre-commit]
+"#;
+
+        let result = validate_manifest_content(valid_manifest);
+        assert!(result.is_ok());
+
+        // Test invalid manifest (missing required fields)
+        let invalid_manifest = r#"
+- name: Test Hook
+  # Missing id and entry
+  language: system
+"#;
+
+        let result = validate_manifest_content(invalid_manifest);
+        assert!(result.is_err());
+
+        // Test manifest with duplicate IDs
+        let duplicate_manifest = r#"
+- id: duplicate
+  name: Hook 1
+  entry: command1
+  language: system
+- id: duplicate
+  name: Hook 2
+  entry: command2
+  language: system
+"#;
+
+        let result = validate_manifest_content(duplicate_manifest);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_supported_languages_and_stages() {
+        let languages = get_supported_languages();
+        assert!(languages.contains("python"));
+        assert!(languages.contains("rust"));
+        assert!(languages.contains("system"));
+        assert!(languages.contains("docker"));
+
+        let stages = get_supported_stages();
+        assert!(stages.contains("pre-commit"));
+        assert!(stages.contains("pre-push"));
+        assert!(stages.contains("commit-msg"));
+        assert!(stages.contains("post-commit"));
+    }
+
+    #[test]
+    fn test_meta_hook_validation() {
+        assert!(is_valid_meta_hook_id("check-hooks-apply"));
+        assert!(is_valid_meta_hook_id("check-useless-excludes"));
+        assert!(is_valid_meta_hook_id("identity"));
+        assert!(!is_valid_meta_hook_id("unknown-meta-hook"));
+    }
+
+    #[test]
+    fn test_yaml_validation() {
+        let mut validator = SchemaValidator::new(ValidationConfig::default());
+
+        // Test valid YAML
+        let valid_yaml = r#"
+repos:
+- repo: https://github.com/psf/black
+  rev: 23.1.0
+  hooks:
+  - id: black
+"#;
+
+        let result = validator.validate_yaml(valid_yaml);
+        assert!(result.is_valid);
+
+        // Test invalid YAML
+        let invalid_yaml = r#"
+repos:
+- repo: https://github.com/psf/black
+  rev: 23.1.0
+  hooks:
+  - id: black
+    invalid: [unclosed
+"#;
+
+        let result = validator.validate_yaml(invalid_yaml);
+        assert!(!result.is_valid);
+        assert!(!result.errors.is_empty());
+    }
 }
 
 /// Manifest hook structure for validation

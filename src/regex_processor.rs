@@ -970,3 +970,419 @@ impl OptimizedBatchRegexProcessor {
 }
 
 // Main exports are done via the struct/enum definitions above
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn test_regex_config_default() {
+        let config = RegexConfig::default();
+        assert!(!config.case_insensitive);
+        assert!(!config.multi_line);
+        assert!(!config.dot_matches_new_line);
+        assert!(config.unicode);
+        assert_eq!(config.size_limit, Some(10 * (1 << 20)));
+        assert_eq!(config.dfa_size_limit, Some(2 * (1 << 20)));
+    }
+
+    #[test]
+    fn test_cache_stats() {
+        let mut stats = CacheStats::default();
+        assert_eq!(stats.hit_rate(), 0.0);
+        assert_eq!(stats.memory_usage(), 0);
+
+        stats.hits = 7;
+        stats.misses = 3;
+        assert!((stats.hit_rate() - 0.7).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_regex_processor_creation() {
+        let config = RegexConfig::default();
+        let processor = RegexProcessor::new(config);
+
+        let stats = processor.get_cache_stats();
+        assert_eq!(stats.hits, 0);
+        assert_eq!(stats.misses, 0);
+        assert_eq!(stats.entry_count, 0);
+    }
+
+    #[test]
+    fn test_regex_processor_cache_size() {
+        let config = RegexConfig::default();
+        let processor = RegexProcessor::new(config).with_cache_size(50);
+
+        // Verify it was created successfully
+        let stats = processor.get_cache_stats();
+        assert_eq!(stats.entry_count, 0);
+    }
+
+    #[test]
+    fn test_regex_processor_max_complexity() {
+        let config = RegexConfig::default();
+        let processor = RegexProcessor::new(config).with_max_complexity(25.0);
+        assert_eq!(processor.max_complexity, 25.0);
+    }
+
+    #[test]
+    fn test_pattern_validation_valid() {
+        let config = RegexConfig::default();
+        let processor = RegexProcessor::new(config);
+
+        assert!(processor.validate_pattern(r"[a-z]+").is_ok());
+        assert!(processor.validate_pattern(r"\d{1,3}").is_ok());
+        assert!(processor.validate_pattern(r"^test$").is_ok());
+    }
+
+    #[test]
+    fn test_pattern_validation_invalid() {
+        let config = RegexConfig::default();
+        let processor = RegexProcessor::new(config);
+
+        assert!(processor.validate_pattern(r"[a-z").is_err());
+        assert!(processor.validate_pattern(r"*invalid").is_err());
+        assert!(processor.validate_pattern(r"(?P<>invalid)").is_err());
+    }
+
+    #[test]
+    fn test_pattern_analysis_simple() {
+        let analysis = PatternAnalyzer::analyze("abc");
+        assert!(analysis.complexity_score < 5.0);
+        assert_eq!(analysis.estimated_performance, PerformanceClass::Fast);
+        assert!(analysis.potential_issues.is_empty());
+        assert!(analysis.security_warnings.is_empty());
+    }
+
+    #[test]
+    fn test_pattern_analysis_complex() {
+        let analysis = PatternAnalyzer::analyze(r"(.*)*");
+        assert!(analysis.complexity_score > 50.0);
+        assert_eq!(
+            analysis.estimated_performance,
+            PerformanceClass::PotentiallyDangerous
+        );
+        assert!(!analysis.security_warnings.is_empty());
+    }
+
+    #[test]
+    fn test_pattern_complexity_calculation() {
+        assert!(PatternAnalyzer::calculate_complexity("abc") < 5.0);
+        assert!(PatternAnalyzer::calculate_complexity(r"[a-z]+\d*") < 20.0);
+        assert!(PatternAnalyzer::calculate_complexity(r"(.*)*") > 50.0);
+    }
+
+    #[test]
+    fn test_redos_detection() {
+        let warning = PatternAnalyzer::detect_redos_vulnerability(r"(.*)*");
+        assert!(warning.is_some());
+
+        let warning = PatternAnalyzer::detect_redos_vulnerability("simple");
+        assert!(warning.is_none());
+    }
+
+    #[test]
+    fn test_optimization_suggestions() {
+        let suggestions = PatternAnalyzer::suggest_optimizations("(a|b|c|d|e)");
+        assert!(!suggestions.is_empty());
+        assert!(suggestions[0].contains("character classes"));
+
+        let suggestions = PatternAnalyzer::suggest_optimizations(".*long_pattern_without_anchors");
+        assert!(suggestions.iter().any(|s| s.contains("anchoring")));
+    }
+
+    #[test]
+    fn test_security_validation() {
+        assert!(PatternAnalyzer::validate_security("simple").is_ok());
+        assert!(PatternAnalyzer::validate_security(r"(.*)*").is_err());
+    }
+
+    #[test]
+    fn test_compiled_regex() {
+        let regex = Arc::new(Regex::new("test").unwrap());
+        let compiled = CompiledRegex {
+            pattern: "test".to_string(),
+            regex: regex.clone(),
+            config: RegexConfig::default(),
+            complexity_score: 5.0,
+            compilation_time: Duration::from_millis(10),
+            usage_count: 1,
+        };
+
+        assert!(compiled.is_match("test"));
+        assert!(!compiled.is_match("fail"));
+
+        let matches = compiled.find_matches("test test");
+        assert_eq!(matches.len(), 2);
+    }
+
+    #[test]
+    fn test_regex_error_suggestions() {
+        let error = RegexError::InvalidPattern {
+            pattern: "[[:alpha".to_string(),
+            error: regex::Error::Syntax("test".to_string()),
+            suggestion: None,
+        };
+
+        assert!(error.suggest_fix().is_some());
+    }
+
+    #[test]
+    fn test_batch_regex_processor() {
+        let mut processor = BatchRegexProcessor::new();
+
+        let patterns = vec!["test".to_string(), r"\d+".to_string()];
+        let texts = vec!["test123".to_string(), "hello".to_string()];
+
+        let result = processor.process_batch(&patterns, &texts);
+        assert!(result.is_ok());
+
+        let matrix = result.unwrap();
+        assert_eq!(matrix.patterns.len(), 2);
+        assert_eq!(matrix.texts.len(), 2);
+        assert_eq!(matrix.matches.len(), 2);
+
+        // "test" should match "test123" but not "hello"
+        assert!(matrix.get_match(0, 0).unwrap());
+        assert!(!matrix.get_match(0, 1).unwrap());
+
+        // "\d+" should match "test123" but not "hello"
+        assert!(matrix.get_match(1, 0).unwrap());
+        assert!(!matrix.get_match(1, 1).unwrap());
+    }
+
+    #[test]
+    fn test_match_matrix_operations() {
+        let matrix = MatchMatrix {
+            patterns: vec!["p1".to_string(), "p2".to_string()],
+            texts: vec!["t1".to_string(), "t2".to_string()],
+            matches: vec![vec![true, false], vec![false, true]],
+            processing_time: Duration::from_millis(10),
+        };
+
+        assert_eq!(matrix.get_match(0, 0), Some(true));
+        assert_eq!(matrix.get_match(0, 1), Some(false));
+        assert_eq!(matrix.get_match(1, 0), Some(false));
+        assert_eq!(matrix.get_match(1, 1), Some(true));
+
+        let pattern_matches = matrix.get_matches_for_pattern(0).unwrap();
+        assert_eq!(pattern_matches, &[true, false]);
+
+        let text_matches = matrix.get_matches_for_text(0);
+        assert_eq!(text_matches, vec![true, false]);
+
+        assert_eq!(matrix.count_total_matches(), 2);
+    }
+
+    #[test]
+    fn test_batch_regex_config_default() {
+        let config = BatchRegexConfig::default();
+        assert!(config.enable_batch_processing);
+        assert_eq!(config.min_patterns_for_batch, 3);
+        assert_eq!(config.cache_size, 256);
+        assert_eq!(config.compile_timeout, Duration::from_secs(5));
+        assert!(config.enable_optimization);
+    }
+
+    #[test]
+    fn test_optimized_batch_processor_empty() {
+        let result = OptimizedBatchRegexProcessor::new(vec![]);
+        assert!(result.is_ok());
+
+        let processor = result.unwrap();
+        assert!(!processor.any_matches("test"));
+        assert!(processor.match_all("test").is_empty());
+        assert!(processor.find_first_match("test").is_none());
+    }
+
+    #[test]
+    fn test_optimized_batch_processor_matching() {
+        let patterns = vec![
+            ("numbers".to_string(), r"\d+".to_string()),
+            ("letters".to_string(), r"[a-z]+".to_string()),
+        ];
+
+        let processor = OptimizedBatchRegexProcessor::new(patterns).unwrap();
+
+        // Test any_matches
+        assert!(processor.any_matches("test123"));
+        assert!(processor.any_matches("123"));
+        assert!(processor.any_matches("test"));
+        assert!(!processor.any_matches("!@#"));
+
+        // Test match_all
+        let matches = processor.match_all("test123");
+        assert_eq!(matches.len(), 2); // Both patterns should match
+
+        // Test find_first_match
+        let first_match = processor.find_first_match("test123");
+        assert!(first_match.is_some());
+        let m = first_match.unwrap();
+        assert!(!m.pattern_name.is_empty());
+        assert_eq!(m.match_text, "test123");
+    }
+
+    #[test]
+    fn test_optimized_batch_processor_config() {
+        let patterns = vec![("test".to_string(), "test".to_string())];
+        let config = BatchRegexConfig {
+            enable_batch_processing: false,
+            min_patterns_for_batch: 5,
+            cache_size: 128,
+            compile_timeout: Duration::from_secs(10),
+            enable_optimization: false,
+        };
+
+        let processor = OptimizedBatchRegexProcessor::with_config(patterns, config).unwrap();
+        let proc_config = processor.get_config();
+
+        assert!(!proc_config.enable_batch_processing);
+        assert_eq!(proc_config.min_patterns_for_batch, 5);
+        assert_eq!(proc_config.cache_size, 128);
+        assert_eq!(proc_config.compile_timeout, Duration::from_secs(10));
+        assert!(!proc_config.enable_optimization);
+    }
+
+    #[test]
+    fn test_optimized_batch_processor_invalid_pattern() {
+        let patterns = vec![("invalid".to_string(), "[invalid".to_string())];
+        let result = OptimizedBatchRegexProcessor::new(patterns);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_regex_match_struct() {
+        let regex_match = RegexMatch {
+            pattern_name: "test_pattern".to_string(),
+            match_text: "matched_text".to_string(),
+            start: 0,
+            end: 12,
+        };
+
+        assert_eq!(regex_match.pattern_name, "test_pattern");
+        assert_eq!(regex_match.match_text, "matched_text");
+        assert_eq!(regex_match.start, 0);
+        assert_eq!(regex_match.end, 12);
+    }
+
+    #[test]
+    fn test_processor_caching() {
+        let mut processor = RegexProcessor::new(RegexConfig::default());
+
+        // First compilation - should be a cache miss
+        let result1 = processor.compile("test");
+        assert!(result1.is_ok());
+        let stats1 = processor.get_cache_stats();
+        assert_eq!(stats1.misses, 1);
+        assert_eq!(stats1.hits, 0);
+
+        // Second compilation - should be a cache hit
+        let result2 = processor.compile("test");
+        assert!(result2.is_ok());
+        let stats2 = processor.get_cache_stats();
+        assert_eq!(stats2.misses, 1);
+        assert_eq!(stats2.hits, 1);
+    }
+
+    #[test]
+    fn test_processor_cache_clearing() {
+        let mut processor = RegexProcessor::new(RegexConfig::default());
+
+        processor.compile("test").unwrap();
+        let stats_before = processor.get_cache_stats();
+        assert!(stats_before.entry_count > 0);
+
+        processor.clear_cache();
+        let stats_after = processor.get_cache_stats();
+        assert_eq!(stats_after.entry_count, 0);
+        assert_eq!(stats_after.memory_usage, 0);
+    }
+
+    #[test]
+    fn test_processor_pattern_matching() {
+        let mut processor = RegexProcessor::new(RegexConfig::default());
+
+        assert!(processor.is_match(r"\d+", "123").unwrap());
+        assert!(!processor.is_match(r"\d+", "abc").unwrap());
+
+        let matches = processor.find_matches(r"\d+", "123 456 789").unwrap();
+        assert_eq!(matches.len(), 3);
+    }
+
+    #[test]
+    fn test_processor_compile_with_config() {
+        let mut processor = RegexProcessor::new(RegexConfig::default());
+        let config = RegexConfig {
+            case_insensitive: true,
+            ..RegexConfig::default()
+        };
+
+        let result = processor.compile_with_config("TEST", config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_processor_compile_set() {
+        let mut processor = RegexProcessor::new(RegexConfig::default());
+        let patterns = vec!["test".to_string(), r"\d+".to_string()];
+
+        let result = processor.compile_set(&patterns);
+        assert!(result.is_ok());
+
+        let set = result.unwrap();
+        assert!(set.is_match("test"));
+        assert!(set.is_match("123"));
+        assert!(!set.is_match("xyz"));
+    }
+
+    #[test]
+    fn test_processor_evict_unused() {
+        let mut processor = RegexProcessor::new(RegexConfig::default());
+        processor.compile("test").unwrap();
+
+        // This should not panic or error
+        processor.evict_unused(Duration::from_secs(1));
+    }
+
+    #[test]
+    fn test_performance_class_ordering() {
+        assert!(PerformanceClass::Fast < PerformanceClass::Moderate);
+        assert!(PerformanceClass::Moderate < PerformanceClass::Slow);
+        assert!(PerformanceClass::Slow < PerformanceClass::PotentiallyDangerous);
+    }
+
+    #[test]
+    fn test_pattern_issue_types() {
+        let issue = PatternIssue::ExcessiveBacktracking {
+            problematic_part: "(.*)* ".to_string(),
+            suggestion: "Use possessive quantifiers".to_string(),
+        };
+
+        match issue {
+            PatternIssue::ExcessiveBacktracking {
+                problematic_part,
+                suggestion,
+            } => {
+                assert_eq!(problematic_part, "(.*)* ");
+                assert_eq!(suggestion, "Use possessive quantifiers");
+            }
+            _ => panic!("Wrong pattern issue type"),
+        }
+    }
+
+    #[test]
+    fn test_compilation_metadata() {
+        let metadata = CompilationMetadata {
+            compilation_time: Duration::from_millis(50),
+            pattern_complexity: 15.5,
+            memory_usage: 1024,
+            dfa_size: Some(512),
+        };
+
+        assert_eq!(metadata.compilation_time, Duration::from_millis(50));
+        assert_eq!(metadata.pattern_complexity, 15.5);
+        assert_eq!(metadata.memory_usage, 1024);
+        assert_eq!(metadata.dfa_size, Some(512));
+    }
+}

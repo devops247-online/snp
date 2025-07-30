@@ -1041,3 +1041,482 @@ pub trait MetricsCollector: Send + Sync {
     fn record_resource_usage(&self, usage: &ResourceUsage);
     fn export_metrics(&self) -> HashMap<String, f64>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::future::BoxFuture;
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    #[test]
+    fn test_task_priority_ordering() {
+        assert!(TaskPriority::Critical > TaskPriority::High);
+        assert!(TaskPriority::High > TaskPriority::Normal);
+        assert!(TaskPriority::Normal > TaskPriority::Low);
+    }
+
+    #[test]
+    fn test_retry_policy_default() {
+        let policy = RetryPolicy::default();
+        assert_eq!(policy.max_retries, 3);
+        assert_eq!(policy.initial_delay, Duration::from_millis(100));
+        assert_eq!(policy.max_delay, Duration::from_secs(30));
+        assert_eq!(policy.backoff_multiplier, 2.0);
+    }
+
+    #[test]
+    fn test_resource_limits_default() {
+        let limits = ResourceLimits::default();
+        assert_eq!(limits.max_cpu_percent, 80.0);
+        assert_eq!(limits.max_memory_mb, 1024);
+        assert_eq!(limits.max_disk_io_mb_per_sec, 100);
+        assert_eq!(limits.max_network_mb_per_sec, 50);
+    }
+
+    #[test]
+    fn test_resource_usage_default() {
+        let usage = ResourceUsage::default();
+        assert_eq!(usage.cpu_percent, 0.0);
+        assert_eq!(usage.memory_mb, 0);
+        assert_eq!(usage.disk_io_mb_per_sec, 0);
+        assert_eq!(usage.network_mb_per_sec, 0);
+        assert_eq!(usage.active_tasks, 0);
+    }
+
+    #[test]
+    fn test_task_config_builder() {
+        let config = TaskConfig::new("test_task")
+            .with_priority(TaskPriority::High)
+            .with_timeout(Duration::from_secs(30))
+            .with_dependencies(vec!["dep1".to_string(), "dep2".to_string()])
+            .with_resource_requirements(ResourceRequirements {
+                cpu_cores: Some(2.0),
+                memory_mb: Some(512),
+                disk_io_mb_per_sec: Some(50),
+                network_mb_per_sec: Some(25),
+            });
+
+        assert_eq!(config.id, "test_task");
+        assert_eq!(config.priority, TaskPriority::High);
+        assert_eq!(config.timeout, Some(Duration::from_secs(30)));
+        assert_eq!(config.dependencies, vec!["dep1", "dep2"]);
+        assert_eq!(config.resource_requirements.cpu_cores, Some(2.0));
+        assert_eq!(config.resource_requirements.memory_mb, Some(512));
+    }
+
+    #[test]
+    fn test_task_state_equality() {
+        assert_eq!(TaskState::Pending, TaskState::Pending);
+        assert_eq!(TaskState::Cancelled, TaskState::Cancelled);
+        assert_ne!(TaskState::Pending, TaskState::Cancelled);
+    }
+
+    #[test]
+    fn test_batch_result_success_rate() {
+        let successful = vec![
+            create_mock_task_result("task1", Ok(())),
+            create_mock_task_result("task2", Ok(())),
+        ];
+        let failed = vec![create_mock_task_result(
+            "task3",
+            Err(SnpError::Config(Box::new(crate::ConfigError::NotFound {
+                path: "test".into(),
+                suggestion: None,
+            }))),
+        )];
+
+        let batch_result = BatchResult {
+            successful,
+            failed,
+            cancelled: vec![],
+            total_duration: Duration::from_secs(1),
+            resource_usage: ResourceUsage::default(),
+        };
+
+        assert!(!batch_result.is_success());
+        assert!((batch_result.success_rate() - 0.666_67).abs() < 0.001);
+        assert_eq!(batch_result.get_errors().len(), 1);
+    }
+
+    #[test]
+    fn test_batch_result_empty() {
+        let batch_result: BatchResult<()> = BatchResult {
+            successful: vec![],
+            failed: vec![],
+            cancelled: vec![],
+            total_duration: Duration::from_secs(0),
+            resource_usage: ResourceUsage::default(),
+        };
+
+        assert!(batch_result.is_success());
+        assert_eq!(batch_result.success_rate(), 1.0);
+        assert!(batch_result.get_errors().is_empty());
+    }
+
+    #[test]
+    fn test_task_dependency_graph_creation() {
+        let mut graph = TaskDependencyGraph::new();
+        let task1 = TaskConfig::new("task1");
+        let task2 = TaskConfig::new("task2");
+
+        graph.add_task(task1);
+        graph.add_task(task2);
+
+        assert!(graph.add_dependency("task2", "task1").is_ok());
+    }
+
+    #[test]
+    fn test_task_dependency_graph_invalid_dependency() {
+        let mut graph = TaskDependencyGraph::new();
+        let task1 = TaskConfig::new("task1");
+        graph.add_task(task1);
+
+        // Try to add dependency to non-existent task
+        assert!(graph.add_dependency("task1", "non_existent").is_err());
+        assert!(graph.add_dependency("non_existent", "task1").is_err());
+    }
+
+    #[test]
+    fn test_task_dependency_graph_cycle_detection() {
+        let mut graph = TaskDependencyGraph::new();
+        let task1 = TaskConfig::new("task1");
+        let task2 = TaskConfig::new("task2");
+        let task3 = TaskConfig::new("task3");
+
+        graph.add_task(task1);
+        graph.add_task(task2);
+        graph.add_task(task3);
+
+        // Create a valid dependency chain
+        assert!(graph.add_dependency("task2", "task1").is_ok());
+        assert!(graph.add_dependency("task3", "task2").is_ok());
+
+        // Try to create a cycle - should fail
+        assert!(graph.add_dependency("task1", "task3").is_err());
+    }
+
+    #[test]
+    fn test_task_dependency_graph_execution_order() {
+        let mut graph = TaskDependencyGraph::new();
+        let task1 = TaskConfig::new("task1");
+        let task2 = TaskConfig::new("task2");
+        let task3 = TaskConfig::new("task3");
+
+        graph.add_task(task1);
+        graph.add_task(task2);
+        graph.add_task(task3);
+
+        graph.add_dependency("task2", "task1").unwrap();
+        graph.add_dependency("task3", "task2").unwrap();
+
+        let order = graph.resolve_execution_order().unwrap();
+        assert_eq!(order, vec!["task1", "task2", "task3"]);
+    }
+
+    #[test]
+    fn test_concurrency_executor_creation() {
+        let limits = ResourceLimits::default();
+        let executor = ConcurrencyExecutor::new(4, limits);
+
+        assert_eq!(executor.max_concurrent, 4);
+        assert!(!executor.is_lock_free_enabled());
+        assert!(executor.get_scheduler_stats().is_none());
+    }
+
+    #[test]
+    fn test_concurrency_executor_with_lock_free() {
+        let limits = ResourceLimits::default();
+        let executor = ConcurrencyExecutor::with_lock_free_scheduler(4, limits);
+
+        assert_eq!(executor.max_concurrent, 4);
+        assert!(executor.is_lock_free_enabled());
+        assert!(executor.get_scheduler_stats().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_execute_simple_task() {
+        let limits = ResourceLimits::default();
+        let executor = ConcurrencyExecutor::new(2, limits);
+        let config = TaskConfig::new("test_task");
+
+        let result = executor
+            .execute_task(config, || Box::pin(async { Ok("task_result".to_string()) }))
+            .await;
+
+        assert!(result.is_ok());
+        let task_result = result.unwrap();
+        assert_eq!(task_result.task_id, "test_task");
+        assert!(task_result.result.is_ok());
+        assert_eq!(task_result.result.unwrap(), "task_result");
+    }
+
+    #[tokio::test]
+    async fn test_execute_task_with_timeout() {
+        let limits = ResourceLimits::default();
+        let executor = ConcurrencyExecutor::new(2, limits);
+        let config = TaskConfig::new("timeout_task").with_timeout(Duration::from_millis(100));
+
+        let result = executor
+            .execute_task(config, || {
+                Box::pin(async {
+                    sleep(Duration::from_millis(200)).await;
+                    Ok("should_timeout".to_string())
+                })
+            })
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_execute_failing_task() {
+        let limits = ResourceLimits::default();
+        let executor = ConcurrencyExecutor::new(2, limits);
+        let config = TaskConfig::new("failing_task");
+
+        let result = executor
+            .execute_task(config, || {
+                Box::pin(async {
+                    Err::<String, _>(SnpError::Config(Box::new(crate::ConfigError::NotFound {
+                        path: "test".into(),
+                        suggestion: None,
+                    })))
+                })
+            })
+            .await;
+
+        assert!(result.is_ok());
+        let task_result: TaskResult<String> = result.unwrap();
+        assert!(task_result.result.is_err());
+        assert_eq!(task_result.retry_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_execute_batch_tasks() {
+        let limits = ResourceLimits::default();
+        let executor = ConcurrencyExecutor::new(2, limits);
+
+        type TaskType = (
+            TaskConfig,
+            Box<dyn FnOnce() -> BoxFuture<'static, Result<String>> + Send>,
+        );
+        let tasks: Vec<TaskType> = vec![
+            (
+                TaskConfig::new("task1"),
+                Box::new(|| Box::pin(async { Ok("result1".to_string()) })),
+            ),
+            (
+                TaskConfig::new("task2"),
+                Box::new(|| Box::pin(async { Ok("result2".to_string()) })),
+            ),
+        ];
+
+        let result = executor.execute_batch(tasks).await;
+
+        assert!(result.is_ok());
+        let batch_result = result.unwrap();
+        assert_eq!(batch_result.successful.len(), 2);
+        assert_eq!(batch_result.failed.len(), 0);
+        assert!(batch_result.is_success());
+    }
+
+    #[tokio::test]
+    async fn test_resource_acquisition() {
+        let limits = ResourceLimits::default();
+        let executor = ConcurrencyExecutor::new(2, limits);
+
+        let requirements = ResourceRequirements {
+            cpu_cores: Some(1.0),
+            memory_mb: Some(256),
+            disk_io_mb_per_sec: None,
+            network_mb_per_sec: None,
+        };
+
+        let guard = executor.acquire_resources(&requirements).await;
+        assert!(guard.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_resource_limit_exceeded() {
+        let limits = ResourceLimits {
+            max_cpu_percent: 50.0,
+            max_memory_mb: 100,
+            max_disk_io_mb_per_sec: 50,
+            max_network_mb_per_sec: 25,
+        };
+        let executor = ConcurrencyExecutor::new(2, limits);
+
+        let requirements = ResourceRequirements {
+            cpu_cores: Some(4.0), // Will exceed 50% CPU limit (4 * 25% = 100%)
+            memory_mb: None,
+            disk_io_mb_per_sec: None,
+            network_mb_per_sec: None,
+        };
+
+        let guard = executor.acquire_resources(&requirements).await;
+        assert!(guard.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_task_cancellation() {
+        let limits = ResourceLimits::default();
+        let executor = ConcurrencyExecutor::new(2, limits);
+
+        // Add a task to registry manually
+        {
+            let mut registry = executor.task_registry.write().await;
+            registry.insert("test_task".to_string(), TaskState::Pending);
+        }
+
+        let result = executor.cancel_task("test_task").await;
+        assert!(result.is_ok());
+
+        let status = executor.get_task_status("test_task").await;
+        assert_eq!(status, Some(TaskState::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn test_cancel_completed_task() {
+        let limits = ResourceLimits::default();
+        let executor = ConcurrencyExecutor::new(2, limits);
+
+        // Add a completed task to registry
+        {
+            let mut registry = executor.task_registry.write().await;
+            registry.insert(
+                "completed_task".to_string(),
+                TaskState::Completed {
+                    duration: Duration::from_secs(1),
+                    retry_count: 0,
+                },
+            );
+        }
+
+        let result = executor.cancel_task("completed_task").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_cancel_all_tasks() {
+        let limits = ResourceLimits::default();
+        let executor = ConcurrencyExecutor::new(2, limits);
+
+        // Add multiple tasks to registry
+        {
+            let mut registry = executor.task_registry.write().await;
+            registry.insert("task1".to_string(), TaskState::Pending);
+            registry.insert("task2".to_string(), TaskState::WaitingForResources);
+            registry.insert(
+                "task3".to_string(),
+                TaskState::Completed {
+                    duration: Duration::from_secs(1),
+                    retry_count: 0,
+                },
+            );
+        }
+
+        let result = executor.cancel_all_tasks().await;
+        assert!(result.is_ok());
+
+        // Check that cancellable tasks were cancelled
+        let status1 = executor.get_task_status("task1").await;
+        let status2 = executor.get_task_status("task2").await;
+        let status3 = executor.get_task_status("task3").await;
+
+        assert_eq!(status1, Some(TaskState::Cancelled));
+        assert_eq!(status2, Some(TaskState::Cancelled));
+        assert_eq!(
+            status3,
+            Some(TaskState::Completed {
+                duration: Duration::from_secs(1),
+                retry_count: 0,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn test_executor_shutdown() {
+        let limits = ResourceLimits::default();
+        let executor = ConcurrencyExecutor::new(2, limits);
+
+        let result = executor.shutdown(Duration::from_secs(1)).await;
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_error_aggregator() {
+        let mut aggregator = ErrorAggregator::new();
+
+        aggregator.add_context("environment".to_string(), "test".to_string());
+        aggregator.add_error(
+            "task1".to_string(),
+            SnpError::Config(Box::new(crate::ConfigError::NotFound {
+                path: "test".into(),
+                suggestion: None,
+            })),
+        );
+
+        let report = aggregator.build_report();
+        assert_eq!(report.total_errors, 1);
+        assert!(report.summary.contains("Total errors: 1"));
+    }
+
+    #[test]
+    fn test_execution_metrics() {
+        let metrics = ExecutionMetrics::new();
+
+        assert_eq!(
+            metrics
+                .tasks_completed
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+        assert_eq!(
+            metrics
+                .tasks_failed
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+        assert_eq!(
+            metrics
+                .tasks_cancelled
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+        assert_eq!(metrics.average_execution_time, Duration::from_secs(0));
+    }
+
+    #[test]
+    fn test_process_manager_integration() {
+        let limits = ResourceLimits::default();
+        let executor = ConcurrencyExecutor::new(4, limits);
+
+        assert!(executor.has_process_manager());
+        let (max_concurrent, timeout) = executor.get_process_manager_info();
+        assert_eq!(max_concurrent, 4);
+        assert_eq!(timeout, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn test_scheduling_strategy() {
+        let limits = ResourceLimits::default();
+        let mut executor = ConcurrencyExecutor::new(2, limits);
+
+        executor.set_scheduling_strategy(SchedulingStrategy::RoundRobin);
+        // Note: In a real implementation, this would affect task ordering
+    }
+
+    fn create_mock_task_result<T>(task_id: &str, result: Result<T>) -> TaskResult<T> {
+        let now = SystemTime::now();
+        TaskResult {
+            task_id: task_id.to_string(),
+            result,
+            duration: Duration::from_millis(100),
+            resource_usage: ResourceUsage::default(),
+            retry_count: 0,
+            started_at: now,
+            completed_at: now,
+        }
+    }
+}

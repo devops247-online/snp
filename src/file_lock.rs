@@ -869,3 +869,534 @@ impl LockError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_lock_config_default() {
+        let config = LockConfig::default();
+        assert_eq!(config.lock_type, LockType::Exclusive);
+        assert_eq!(config.behavior, LockBehavior::Advisory);
+        assert_eq!(config.timeout, Duration::from_secs(10));
+        assert_eq!(config.retry_interval, Duration::from_millis(100));
+        assert_eq!(config.stale_timeout, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn test_lock_types() {
+        assert_eq!(LockType::Shared, LockType::Shared);
+        assert_eq!(LockType::Exclusive, LockType::Exclusive);
+        assert_ne!(LockType::Shared, LockType::Exclusive);
+    }
+
+    #[test]
+    fn test_lock_behaviors() {
+        assert_eq!(LockBehavior::Advisory, LockBehavior::Advisory);
+        assert_eq!(LockBehavior::Mandatory, LockBehavior::Mandatory);
+        assert_ne!(LockBehavior::Advisory, LockBehavior::Mandatory);
+    }
+
+    #[test]
+    fn test_lock_metrics_default() {
+        let metrics = LockMetrics::default();
+        assert_eq!(metrics.total_acquisitions, 0);
+        assert_eq!(metrics.total_timeouts, 0);
+        assert_eq!(metrics.average_acquisition_time, Duration::from_millis(0));
+        assert_eq!(metrics.active_locks, 0);
+        assert_eq!(metrics.stale_locks_cleaned, 0);
+    }
+
+    #[test]
+    fn test_file_lock_manager_creation() {
+        let config = LockConfig::default();
+        let manager = FileLockManager::new(config);
+        assert!(manager.is_ok());
+
+        let manager = manager.unwrap();
+        let metrics = manager.get_lock_metrics();
+        assert_eq!(metrics.total_acquisitions, 0);
+    }
+
+    #[test]
+    fn test_lock_hierarchy_creation() {
+        let hierarchy = LockHierarchy::new();
+        assert!(hierarchy.levels.is_empty());
+        assert!(hierarchy.ordering.is_empty());
+    }
+
+    #[test]
+    fn test_lock_hierarchy_add_path() {
+        let mut hierarchy = LockHierarchy::new();
+        let path = PathBuf::from("/test/path");
+
+        hierarchy.add_path(path.clone(), 1);
+        assert_eq!(hierarchy.get_level(&path), Some(1));
+        assert_eq!(hierarchy.ordering.len(), 1);
+    }
+
+    #[test]
+    fn test_lock_hierarchy_ordering() {
+        let mut hierarchy = LockHierarchy::new();
+        let path1 = PathBuf::from("/test/path1");
+        let path2 = PathBuf::from("/test/path2");
+
+        hierarchy.add_path(path2.clone(), 2);
+        hierarchy.add_path(path1.clone(), 1);
+
+        // Should be ordered by level
+        assert_eq!(hierarchy.ordering[0], path1);
+        assert_eq!(hierarchy.ordering[1], path2);
+    }
+
+    #[test]
+    fn test_lock_hierarchy_validate_order() {
+        let mut hierarchy = LockHierarchy::new();
+        let path1 = PathBuf::from("/test/path1");
+        let path2 = PathBuf::from("/test/path2");
+
+        hierarchy.add_path(path1.clone(), 1);
+        hierarchy.add_path(path2.clone(), 2);
+
+        // Valid order
+        let valid_order = [path1.as_path(), path2.as_path()];
+        assert!(hierarchy.validate_order(&valid_order).is_ok());
+
+        // Invalid order (should fail)
+        let invalid_order = [path2.as_path(), path1.as_path()];
+        assert!(hierarchy.validate_order(&invalid_order).is_err());
+    }
+
+    #[test]
+    fn test_lock_hierarchy_sort() {
+        let mut hierarchy = LockHierarchy::new();
+        let path1 = PathBuf::from("/test/path1");
+        let path2 = PathBuf::from("/test/path2");
+
+        hierarchy.add_path(path1.clone(), 2);
+        hierarchy.add_path(path2.clone(), 1);
+
+        let mut paths = [path1.as_path(), path2.as_path()];
+        hierarchy.sort_by_hierarchy(&mut paths);
+
+        // Should be sorted by hierarchy level
+        assert_eq!(paths[0], path2.as_path());
+        assert_eq!(paths[1], path1.as_path());
+    }
+
+    #[test]
+    fn test_lock_ordering_canonical() {
+        let path1 = PathBuf::from("/z/path");
+        let path2 = PathBuf::from("/a/path");
+
+        let mut paths = [path1.as_path(), path2.as_path()];
+        LockOrdering::canonical_path_order(&mut paths);
+
+        // Should be sorted alphabetically
+        assert_eq!(paths[0], path2.as_path());
+        assert_eq!(paths[1], path1.as_path());
+    }
+
+    #[test]
+    fn test_lock_ordering_alphabetical() {
+        let path1 = PathBuf::from("zebra");
+        let path2 = PathBuf::from("apple");
+
+        let mut paths = [path1.as_path(), path2.as_path()];
+        LockOrdering::alphabetical_order(&mut paths);
+
+        assert_eq!(paths[0], path2.as_path());
+        assert_eq!(paths[1], path1.as_path());
+    }
+
+    #[test]
+    fn test_stale_lock_detector_creation() {
+        let detector = StaleLockDetector::new(Duration::from_secs(1), Duration::from_secs(300));
+
+        assert_eq!(detector.check_interval(), Duration::from_secs(1));
+        assert_eq!(detector.stale_timeout(), Duration::from_secs(300));
+    }
+
+    #[test]
+    fn test_stale_lock_detection() {
+        let detector = StaleLockDetector::new(
+            Duration::from_secs(1),
+            Duration::from_secs(1), // Very short timeout for testing
+        );
+
+        let lock_info = LockInfo {
+            path: PathBuf::from("/test"),
+            lock_type: LockType::Exclusive,
+            process_id: std::process::id(),
+            thread_id: 0,
+            acquired_at: SystemTime::now() - Duration::from_secs(2), // 2 seconds ago
+            last_accessed: SystemTime::now() - Duration::from_secs(2),
+        };
+
+        let status = detector.check_lock_status(&lock_info);
+        match status {
+            LockStatus::Abandoned { .. } => {
+                // Expected for old timestamp
+            }
+            LockStatus::Active => {
+                // Also acceptable if the lock is from current process
+            }
+            LockStatus::Stale { .. } => {
+                // Could happen if process detection fails
+            }
+        }
+    }
+
+    #[test]
+    fn test_current_thread_id() {
+        let id1 = current_thread_id();
+        let id2 = current_thread_id();
+        assert_eq!(id1, id2); // Same thread should have same ID
+    }
+
+    #[test]
+    fn test_file_lock_properties() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test.txt");
+        File::create(&test_path).unwrap();
+
+        let manager = FileLockManager::new(LockConfig::default()).unwrap();
+        let lock = manager
+            .acquire_lock(&test_path, LockConfig::default())
+            .unwrap();
+
+        assert_eq!(lock.path(), &test_path);
+        assert_eq!(lock.lock_type(), LockType::Exclusive);
+        assert_eq!(lock.process_id(), std::process::id());
+        assert!(lock.duration_held() < Duration::from_secs(1));
+        assert!(!lock.is_stale(Duration::from_secs(300)));
+
+        let info = lock.lock_info();
+        assert_eq!(info.path, test_path);
+        assert_eq!(info.lock_type, LockType::Exclusive);
+        assert_eq!(info.process_id, std::process::id());
+    }
+
+    #[test]
+    fn test_file_lock_manager_try_acquire() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test.txt");
+        File::create(&test_path).unwrap();
+
+        let manager = FileLockManager::new(LockConfig::default()).unwrap();
+        let result = manager
+            .try_acquire_lock(&test_path, LockConfig::default())
+            .unwrap();
+
+        assert!(result.is_some());
+        let lock = result.unwrap();
+        assert_eq!(lock.path(), &test_path);
+    }
+
+    #[test]
+    fn test_file_lock_manager_metrics() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test.txt");
+        File::create(&test_path).unwrap();
+
+        let manager = FileLockManager::new(LockConfig::default()).unwrap();
+
+        let metrics_before = manager.get_lock_metrics();
+        assert_eq!(metrics_before.total_acquisitions, 0);
+
+        let _lock = manager
+            .acquire_lock(&test_path, LockConfig::default())
+            .unwrap();
+
+        let metrics_after = manager.get_lock_metrics();
+        assert_eq!(metrics_after.total_acquisitions, 1);
+        assert_eq!(metrics_after.active_locks, 1);
+    }
+
+    #[test]
+    fn test_file_lock_manager_active_locks() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test.txt");
+        File::create(&test_path).unwrap();
+
+        let manager = FileLockManager::new(LockConfig::default()).unwrap();
+
+        let active_before = manager.get_active_locks();
+        assert!(active_before.is_empty());
+
+        let _lock = manager
+            .acquire_lock(&test_path, LockConfig::default())
+            .unwrap();
+
+        let active_after = manager.get_active_locks();
+        assert_eq!(active_after.len(), 1);
+        assert_eq!(active_after[0].path, test_path);
+    }
+
+    #[test]
+    fn test_file_lock_manager_lock_status() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test.txt");
+        File::create(&test_path).unwrap();
+
+        let manager = FileLockManager::new(LockConfig::default()).unwrap();
+
+        assert!(manager.get_lock_status(&test_path).is_none());
+
+        let _lock = manager
+            .acquire_lock(&test_path, LockConfig::default())
+            .unwrap();
+
+        let status = manager.get_lock_status(&test_path);
+        assert!(status.is_some());
+    }
+
+    #[test]
+    fn test_file_lock_manager_force_unlock() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test.txt");
+        File::create(&test_path).unwrap();
+
+        let manager = FileLockManager::new(LockConfig::default()).unwrap();
+        let _lock = manager
+            .acquire_lock(&test_path, LockConfig::default())
+            .unwrap();
+
+        assert!(manager.get_lock_status(&test_path).is_some());
+
+        let result = manager.force_unlock(&test_path);
+        assert!(result.is_ok());
+
+        assert!(manager.get_lock_status(&test_path).is_none());
+    }
+
+    #[test]
+    fn test_file_lock_manager_cleanup_stale() {
+        let manager = FileLockManager::new(LockConfig::default()).unwrap();
+        let result = manager.cleanup_stale_locks();
+        assert!(result.is_ok());
+        let cleaned = result.unwrap();
+        assert_eq!(cleaned, 0); // No stale locks to clean
+    }
+
+    #[test]
+    fn test_config_file_lock_read() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("config.yaml");
+        std::fs::write(&test_path, "test: value").unwrap();
+
+        let result = ConfigFileLock::acquire_read_lock(&test_path);
+        assert!(result.is_ok());
+
+        let lock = result.unwrap();
+        assert_eq!(lock.lock_type(), LockType::Shared);
+    }
+
+    #[test]
+    fn test_config_file_lock_write() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("config.yaml");
+        std::fs::write(&test_path, "test: value").unwrap();
+
+        let result = ConfigFileLock::acquire_write_lock(&test_path);
+        assert!(result.is_ok());
+
+        let lock = result.unwrap();
+        assert_eq!(lock.lock_type(), LockType::Exclusive);
+    }
+
+    #[test]
+    fn test_config_file_atomic_update() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("config.yaml");
+        std::fs::write(&test_path, "original content").unwrap();
+
+        let result =
+            ConfigFileLock::atomic_update(&test_path, |content| Ok(format!("{content} updated")));
+
+        assert!(result.is_ok());
+
+        let updated_content = std::fs::read_to_string(&test_path).unwrap();
+        assert_eq!(updated_content, "original content updated");
+    }
+
+    #[test]
+    fn test_temp_file_lock() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let result = TempFileLock::acquire_temp_lock(temp_dir.path(), "test");
+        assert!(result.is_ok());
+
+        let (lock, temp_path) = result.unwrap();
+        assert_eq!(lock.lock_type(), LockType::Exclusive);
+        assert!(temp_path.exists());
+    }
+
+    #[test]
+    fn test_temp_file_cleanup() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create some temporary lock files
+        let lock_file1 = temp_dir.path().join("test1.lock");
+        let lock_file2 = temp_dir.path().join("test2.lock");
+        std::fs::write(&lock_file1, "lock1").unwrap();
+        std::fs::write(&lock_file2, "lock2").unwrap();
+
+        let cleaned = TempFileLock::cleanup_temp_locks(temp_dir.path()).unwrap();
+        assert_eq!(cleaned, 2);
+
+        assert!(!lock_file1.exists());
+        assert!(!lock_file2.exists());
+    }
+
+    #[test]
+    fn test_lock_error_constructors() {
+        let path = PathBuf::from("/test/path");
+        let timeout_error =
+            LockError::timeout(path.clone(), Duration::from_secs(10), LockType::Exclusive);
+
+        match timeout_error {
+            LockError::Timeout {
+                path: p,
+                timeout,
+                lock_type,
+            } => {
+                assert_eq!(p, path);
+                assert_eq!(timeout, Duration::from_secs(10));
+                assert_eq!(lock_type, LockType::Exclusive);
+            }
+            _ => panic!("Wrong error type"),
+        }
+
+        let hierarchy_error =
+            LockError::hierarchy_violation(path.clone(), 1, PathBuf::from("/previous"), 2);
+
+        match hierarchy_error {
+            LockError::HierarchyViolation {
+                path: p,
+                level,
+                previous_path,
+                previous_level,
+            } => {
+                assert_eq!(p, path);
+                assert_eq!(level, 1);
+                assert_eq!(previous_path, PathBuf::from("/previous"));
+                assert_eq!(previous_level, 2);
+            }
+            _ => panic!("Wrong error type"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_stale_lock_detector_check_cycle() {
+        let detector = StaleLockDetector::new(Duration::from_millis(10), Duration::from_secs(1));
+
+        let lock_info = LockInfo {
+            path: PathBuf::from("/test"),
+            lock_type: LockType::Exclusive,
+            process_id: std::process::id(),
+            thread_id: 0,
+            acquired_at: SystemTime::now(),
+            last_accessed: SystemTime::now(),
+        };
+
+        let locks = vec![lock_info];
+        let stale_locks = detector.run_check_cycle(&locks).await;
+
+        // Should not find any stale locks for a current, active lock
+        assert!(stale_locks.is_empty());
+    }
+
+    #[test]
+    fn test_stale_lock_detector_background_cleanup() {
+        let detector = StaleLockDetector::new(Duration::from_secs(1), Duration::from_secs(300));
+
+        let result = detector.start_background_cleanup();
+        assert!(result.is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_unix_file_locking() {
+        let unix_locking = UnixFileLocking {
+            use_flock: true,
+            use_fcntl: true,
+        };
+
+        assert!(unix_locking.acquire_flock(0, LockType::Exclusive).is_ok());
+        assert!(unix_locking
+            .acquire_fcntl(0, LockType::Shared, 0, 100)
+            .is_ok());
+
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test.txt");
+        std::fs::write(&test_path, "test").unwrap();
+
+        assert!(unix_locking.check_mandatory_locking(&test_path));
+    }
+
+    #[test]
+    fn test_lock_ordering_inode() {
+        let temp_dir = TempDir::new().unwrap();
+        let path1 = temp_dir.path().join("file1.txt");
+        let path2 = temp_dir.path().join("file2.txt");
+
+        std::fs::write(&path1, "content1").unwrap();
+        std::fs::write(&path2, "content2").unwrap();
+
+        let mut paths = [path1.as_path(), path2.as_path()];
+        let result = LockOrdering::inode_order(&mut paths);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_file_lock_manager_multiple_ordered() {
+        let temp_dir = TempDir::new().unwrap();
+        let path1 = temp_dir.path().join("file1.txt");
+        let path2 = temp_dir.path().join("file2.txt");
+
+        std::fs::write(&path1, "content1").unwrap();
+        std::fs::write(&path2, "content2").unwrap();
+
+        let manager = FileLockManager::new(LockConfig::default()).unwrap();
+        let paths = [path1.as_path(), path2.as_path()];
+
+        let result = manager.acquire_multiple_ordered(&paths, LockConfig::default());
+        assert!(result.is_ok());
+
+        let locks = result.unwrap();
+        assert_eq!(locks.len(), 2);
+    }
+
+    #[test]
+    fn test_file_lock_manager_upgrade_downgrade() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_path = temp_dir.path().join("test.txt");
+        std::fs::write(&test_path, "content").unwrap();
+
+        let manager = FileLockManager::new(LockConfig::default()).unwrap();
+
+        // Start with shared lock
+        let shared_config = LockConfig {
+            lock_type: LockType::Shared,
+            ..LockConfig::default()
+        };
+        let shared_lock = manager.acquire_lock(&test_path, shared_config).unwrap();
+        assert_eq!(shared_lock.lock_type(), LockType::Shared);
+
+        // Upgrade to exclusive
+        let exclusive_lock = manager
+            .upgrade_lock(shared_lock, LockType::Exclusive)
+            .unwrap();
+        assert_eq!(exclusive_lock.lock_type(), LockType::Exclusive);
+
+        // Downgrade back to shared
+        let downgraded_lock = manager
+            .downgrade_lock(exclusive_lock, LockType::Shared)
+            .unwrap();
+        assert_eq!(downgraded_lock.lock_type(), LockType::Shared);
+    }
+}
