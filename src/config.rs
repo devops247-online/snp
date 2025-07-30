@@ -42,6 +42,7 @@ pub struct Hook {
     pub files: Option<String>,
     pub exclude: Option<String>,
     pub types: Option<Vec<String>>,
+    pub types_or: Option<Vec<String>>,
     pub exclude_types: Option<Vec<String>>,
     pub additional_dependencies: Option<Vec<String>>,
     pub args: Option<Vec<String>>,
@@ -417,6 +418,15 @@ impl Config {
                             .map(|s| s.to_string())
                             .collect()
                     }),
+                types_or: hook_def
+                    .get("types_or")
+                    .and_then(|v| v.as_sequence())
+                    .map(|seq| {
+                        seq.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .collect()
+                    }),
                 exclude_types: hook_def
                     .get("exclude_types")
                     .and_then(|v| v.as_sequence())
@@ -501,6 +511,10 @@ impl Config {
 
         if user_hook.types.is_none() && repo_hook.types.is_some() {
             user_hook.types = repo_hook.types.clone();
+        }
+
+        if user_hook.types_or.is_none() && repo_hook.types_or.is_some() {
+            user_hook.types_or = repo_hook.types_or.clone();
         }
 
         if user_hook.exclude_types.is_none() && repo_hook.exclude_types.is_some() {

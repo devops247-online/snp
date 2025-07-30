@@ -26,6 +26,117 @@ use super::environment::{
 use super::traits::{Command, Language, LanguageConfig, LanguageError};
 use thiserror::Error;
 
+/// File state for modification detection
+#[derive(Debug, Clone)]
+struct FileState {
+    #[allow(dead_code)]
+    path: PathBuf,
+    modified_time: std::time::SystemTime,
+    size: u64,
+    content_hash: u64, // Simple hash of file content for accurate modification detection
+}
+
+impl FileState {
+    /// Capture the current state of a file
+    async fn capture(path: &Path) -> Result<Option<Self>> {
+        match fs::metadata(path).await {
+            Ok(metadata) => {
+                let modified_time = metadata
+                    .modified()
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                let size = metadata.len();
+
+                // Read file content and compute hash for reliable modification detection
+                let content_hash = match fs::read(path).await {
+                    Ok(content) => {
+                        use std::collections::hash_map::DefaultHasher;
+                        use std::hash::{Hash, Hasher};
+
+                        let mut hasher = DefaultHasher::new();
+                        content.hash(&mut hasher);
+                        hasher.finish()
+                    }
+                    Err(_) => 0, // Fallback to 0 if we can't read the file
+                };
+
+                Ok(Some(FileState {
+                    path: path.to_path_buf(),
+                    modified_time,
+                    size,
+                    content_hash,
+                }))
+            }
+            Err(_) => Ok(None), // File doesn't exist
+        }
+    }
+
+    /// Check if this file has been modified compared to another state
+    fn is_modified(&self, other: &Self) -> bool {
+        // Primary check: content hash (most reliable)
+        if self.content_hash != other.content_hash {
+            return true;
+        }
+
+        // Secondary check: size (quick check)
+        if self.size != other.size {
+            return true;
+        }
+
+        // Tertiary check: modification time (least reliable, only as backup)
+        // Use a tolerance to handle filesystem precision issues
+        if let (Ok(duration_self), Ok(duration_other)) = (
+            self.modified_time
+                .duration_since(std::time::SystemTime::UNIX_EPOCH),
+            other
+                .modified_time
+                .duration_since(std::time::SystemTime::UNIX_EPOCH),
+        ) {
+            let time_diff = duration_self.abs_diff(duration_other);
+
+            // Only consider modification time if difference is > 1 second
+            // This helps avoid false positives from filesystem metadata updates
+            if time_diff > std::time::Duration::from_secs(1) {
+                return true;
+            }
+        }
+
+        false
+    }
+}
+
+/// Capture the states of multiple files
+async fn capture_file_states(files: &[PathBuf]) -> Result<HashMap<PathBuf, FileState>> {
+    let mut states = HashMap::new();
+
+    for file in files {
+        if let Some(state) = FileState::capture(file).await? {
+            states.insert(file.clone(), state);
+        }
+    }
+
+    Ok(states)
+}
+
+/// Detect which files have been modified by comparing states
+async fn detect_modified_files(
+    files: &[PathBuf],
+    states_before: &HashMap<PathBuf, FileState>,
+) -> Result<Vec<PathBuf>> {
+    let mut modified_files = Vec::new();
+
+    for file in files {
+        if let Some(state_before) = states_before.get(file) {
+            if let Some(state_after) = FileState::capture(file).await? {
+                if state_after.is_modified(state_before) {
+                    modified_files.push(file.clone());
+                }
+            }
+        }
+    }
+
+    Ok(modified_files)
+}
+
 /// Python-specific error types
 #[derive(Debug, Error)]
 pub enum PythonError {
@@ -701,8 +812,18 @@ impl PythonLanguagePlugin {
 
     /// Find executable in virtual environment, including console scripts
     fn find_executable_in_venv(&self, env_path: &Path, entry: &str) -> Result<PathBuf> {
+        // Parse entry to extract the actual executable name from complex commands
+        // For entries like "ruff check --force-exclude", we want just "ruff"
+        let executable_name = entry.split_whitespace().next().unwrap_or(entry);
+
+        tracing::debug!(
+            "Finding executable for entry '{}', looking for executable: '{}'",
+            entry,
+            executable_name
+        );
+
         // First try direct path in venv bin
-        let venv_bin_path = env_path.join("bin").join(entry);
+        let venv_bin_path = env_path.join("bin").join(executable_name);
         if venv_bin_path.exists() {
             tracing::debug!("Found executable directly in venv: {:?}", venv_bin_path);
             return Ok(venv_bin_path);
@@ -710,9 +831,9 @@ impl PythonLanguagePlugin {
 
         // Try alternative executable names (some packages use different naming)
         let alternative_names = [
-            format!("{entry}-script"),
-            format!("{entry}.py"),
-            entry.replace("-", "_"),
+            format!("{executable_name}-script"),
+            format!("{executable_name}.py"),
+            executable_name.replace("-", "_"),
         ];
 
         for alt_name in &alternative_names {
@@ -730,7 +851,7 @@ impl PythonLanguagePlugin {
         ];
 
         for (hook_name, module_name) in &module_based_hooks {
-            if entry == *hook_name {
+            if executable_name == *hook_name {
                 tracing::debug!(
                     "Entry '{}' is a module-based hook, using module: {}",
                     entry,
@@ -740,16 +861,29 @@ impl PythonLanguagePlugin {
             }
         }
 
-        // For most pre-commit hooks, if we can't find the executable, it might be a race condition
-        // or the installation hasn't completed yet. Return the expected path and let execution
-        // handle the error with proper retry logic.
-        let expected_path = env_path.join("bin").join(entry);
+        // If we can't find the executable, return an error instead of a non-existent path
+        // This ensures proper error handling and prevents hooks from showing as "Passed" when they fail
+        let expected_path = env_path.join("bin").join(executable_name);
         tracing::debug!(
-            "Could not find executable '{}' in venv at {:?}, will retry during execution",
+            "Could not find executable '{}' (from entry '{}') in venv at {:?}",
+            executable_name,
             entry,
             expected_path
         );
-        Ok(expected_path)
+
+        Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
+            language: "python".to_string(),
+            error: format!(
+                "Executable '{}' not found in virtual environment at: {}",
+                executable_name,
+                expected_path.display()
+            ),
+            recovery_suggestion: Some(
+                format!(
+                    "The executable '{executable_name}' may not be properly installed. Try running: pip install <package-name>"
+                )
+            ),
+        }))
     }
 
     /// Get the PATH environment variable for the virtual environment
@@ -1560,7 +1694,38 @@ impl Language for PythonLanguagePlugin {
         tracing::debug!("Environment root_path: {:?}", env.root_path);
         tracing::debug!("Environment executable_path: {:?}", env.executable_path);
 
-        let command = self.build_command(hook, env, files)?;
+        // Try to build command, but handle missing executables gracefully
+        let command = match self.build_command(hook, env, files) {
+            Ok(cmd) => cmd,
+            Err(e) => {
+                // Check if this is a missing executable error that we should handle gracefully
+                let error_msg = e.to_string();
+                if error_msg.contains("not found") || error_msg.contains("Executable") {
+                    tracing::debug!(
+                        "Hook {} executable not found, skipping gracefully: {}",
+                        hook.id,
+                        error_msg
+                    );
+                    let start_time = std::time::Instant::now();
+                    return Ok(HookExecutionResult {
+                        hook_id: hook.id.clone(),
+                        success: false, // Skipped hooks are not considered successful for aggregation
+                        skipped: true,
+                        skip_reason: Some("no files to check".to_string()), // Match Python pre-commit message
+                        exit_code: None,
+                        duration: start_time.elapsed(),
+                        files_processed: files.to_vec(),
+                        files_modified: Vec::new(),
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        error: None,
+                    });
+                } else {
+                    // For other errors, propagate them as before
+                    return Err(e);
+                }
+            }
+        };
         tracing::debug!(
             "Built command: executable={:?}, args={:?}",
             command.executable,
@@ -1596,6 +1761,11 @@ impl Language for PythonLanguagePlugin {
 
         tracing::debug!("About to execute command for hook: {}", hook.id);
 
+        // Capture file states immediately before execution for modification detection
+        // This ensures we capture the states just before this specific hook runs,
+        // avoiding race conditions with parallel hooks
+        let file_states_before = capture_file_states(files).await?;
+
         // Execute with timeout
         let output = if let Some(timeout) = command.timeout {
             match tokio::time::timeout(timeout, tokio_cmd.output()).await {
@@ -1630,6 +1800,27 @@ impl Language for PythonLanguagePlugin {
 
         let duration = start_time.elapsed();
 
+        // Detect file modifications after execution
+        let files_modified = detect_modified_files(files, &file_states_before).await?;
+        if !files_modified.is_empty() {
+            tracing::debug!(
+                "Hook {} modified {} files: {:?}",
+                hook.id,
+                files_modified.len(),
+                files_modified
+            );
+        } else {
+            tracing::debug!("Hook {} modified no files", hook.id);
+        }
+
+        // Debug: log the actual files_modified that will be used in the result
+        tracing::debug!(
+            "Hook {} final files_modified for HookExecutionResult: {:?}",
+            hook.id,
+            files_modified
+        );
+
+
         Ok(HookExecutionResult {
             hook_id: hook.id.clone(),
             success: output.status.success(),
@@ -1638,7 +1829,7 @@ impl Language for PythonLanguagePlugin {
             exit_code: output.status.code(),
             duration,
             files_processed: files.to_vec(),
-            files_modified: vec![], // Could be enhanced to detect file modifications
+            files_modified,
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
             error: if output.status.success() {
@@ -1689,10 +1880,8 @@ impl Language for PythonLanguagePlugin {
                 hook.entry
             );
 
-            // Use the improved executable finder
-            let executable_path = self
-                .find_executable_in_venv(&env.root_path, &hook.entry)
-                .unwrap_or_else(|_| PathBuf::from(&hook.entry));
+            // Use the improved executable finder - now properly handles errors
+            let executable_path = self.find_executable_in_venv(&env.root_path, &hook.entry)?;
 
             // Check if it's a module marker
             if let Some(module_name) = executable_path.to_string_lossy().strip_prefix("__module__")
@@ -1700,10 +1889,24 @@ impl Language for PythonLanguagePlugin {
                 tracing::debug!("Running as Python module: {}", module_name);
                 command = Command::new(python_exe.to_string_lossy());
                 command.arg("-m").arg(module_name);
+                // Add the original entry arguments (excluding the executable name)
+                let entry_parts: Vec<&str> = hook.entry.split_whitespace().collect();
+                if entry_parts.len() > 1 {
+                    for arg in &entry_parts[1..] {
+                        command.arg(*arg);
+                    }
+                }
                 command.args(&hook.args);
             } else {
                 tracing::debug!("Using executable path: {:?}", executable_path);
                 command = Command::new(executable_path.to_string_lossy());
+                // Add the original entry arguments (excluding the executable name)
+                let entry_parts: Vec<&str> = hook.entry.split_whitespace().collect();
+                if entry_parts.len() > 1 {
+                    for arg in &entry_parts[1..] {
+                        command.arg(*arg);
+                    }
+                }
                 command.args(&hook.args);
             }
         }

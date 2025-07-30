@@ -497,7 +497,10 @@ impl Hook {
             hook = hook.with_exclude(exclude);
         }
 
-        if let Some(types) = &config_hook.types {
+        // Handle types_or first (preferred), then fall back to types
+        if let Some(types_or) = &config_hook.types_or {
+            hook = hook.with_types(types_or.clone());
+        } else if let Some(types) = &config_hook.types {
             hook = hook.with_types(types.clone());
         }
 

@@ -143,6 +143,37 @@ impl UserOutput {
             }
         }
 
+        // Show file modifications for both successful and failed hooks (like Python pre-commit)
+        if !result.files_modified.is_empty() {
+            // Show "files were modified by this hook" message
+            println!(
+                "{}- files were modified by this hook{}",
+                self.colors.gray, self.colors.reset
+            );
+
+            println!(); // Add blank line before fixing messages like Python pre-commit
+
+            // Show "Fixing [relative_path]" for each modified file with white text
+            for file in &result.files_modified {
+                // Get relative path from current working directory
+                if let Ok(current_dir) = std::env::current_dir() {
+                    if let Ok(relative_path) = file.strip_prefix(&current_dir) {
+                        println!("Fixing {}", relative_path.display());
+                    } else {
+                        // Fallback to full path if we can't make it relative
+                        println!("Fixing {}", file.display());
+                    }
+                } else {
+                    // Fallback to filename if we can't get current dir
+                    if let Some(filename) = file.file_name() {
+                        println!("Fixing {}", filename.to_string_lossy());
+                    }
+                }
+            }
+
+            println!(); // Add blank line after fixing messages like Python pre-commit
+        }
+
         // Show verbose details if requested
         if self.config.verbose {
             self.show_verbose_details(result);
@@ -208,6 +239,21 @@ impl UserOutput {
                 "{}✗ Some hooks failed!{}",
                 self.colors.red, self.colors.reset,
             );
+
+            // Always show which hooks failed (not just in verbose mode)
+            if !result.hooks_failed.is_empty() {
+                let failed_names: Vec<String> = result
+                    .hooks_failed
+                    .iter()
+                    .map(|h| h.hook_id.clone())
+                    .collect();
+                println!(
+                    "{}Failed hooks: {}{}",
+                    self.colors.red,
+                    failed_names.join(", "),
+                    self.colors.reset
+                );
+            }
 
             if self.config.verbose {
                 println!(

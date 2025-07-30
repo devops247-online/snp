@@ -182,6 +182,7 @@ async fn test_hook_dependency_conversion_to_core() {
         files: None,
         exclude: None,
         types: None,
+        types_or: None,
         exclude_types: None,
         additional_dependencies: None,
         args: None,
