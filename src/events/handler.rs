@@ -134,7 +134,7 @@ impl EventHandler for LoggingEventHandler {
                 ..
             } => {
                 self.logger
-                    .error(&format!(
+                    .debug(&format!(
                         "Hook failed: {hook_id} (execution: {execution_id}) after {duration:?} - {error}"
                     ))
                     .await;

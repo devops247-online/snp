@@ -182,6 +182,7 @@ async fn test_hook_dependency_conversion_to_core() {
         files: None,
         exclude: None,
         types: None,
+        types_or: None,
         exclude_types: None,
         additional_dependencies: None,
         args: None,
@@ -191,6 +192,7 @@ async fn test_hook_dependency_conversion_to_core() {
         stages: None,
         verbose: None,
         depends_on: Some(vec!["dependency1".to_string(), "dependency2".to_string()]),
+        concurrent: None,
     };
 
     // Convert to core Hook

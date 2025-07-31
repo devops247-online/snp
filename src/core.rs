@@ -228,6 +228,8 @@ pub struct Hook {
     pub minimum_pre_commit_version: Option<String>,
     /// Hook IDs that this hook depends on (must run before this hook)
     pub depends_on: Vec<String>,
+    /// Whether this hook can run concurrently with others (default: true)
+    pub concurrent: bool,
 }
 
 impl Hook {
@@ -255,6 +257,7 @@ impl Hook {
             verbose: false,
             minimum_pre_commit_version: None,
             depends_on: Vec::new(),
+            concurrent: true, // Default to allowing concurrency
         }
     }
 
@@ -321,6 +324,11 @@ impl Hook {
 
     pub fn with_depends_on(mut self, depends_on: Vec<String>) -> Self {
         self.depends_on = depends_on;
+        self
+    }
+
+    pub fn with_concurrent(mut self, concurrent: bool) -> Self {
+        self.concurrent = concurrent;
         self
     }
 
@@ -497,7 +505,10 @@ impl Hook {
             hook = hook.with_exclude(exclude);
         }
 
-        if let Some(types) = &config_hook.types {
+        // Handle types_or first (preferred), then fall back to types
+        if let Some(types_or) = &config_hook.types_or {
+            hook = hook.with_types(types_or.clone());
+        } else if let Some(types) = &config_hook.types {
             hook = hook.with_types(types.clone());
         }
 
@@ -516,6 +527,9 @@ impl Hook {
         if let Some(depends_on) = &config_hook.depends_on {
             hook = hook.with_depends_on(depends_on.clone());
         }
+
+        // Set concurrent flag - default to true if not specified
+        hook.concurrent = config_hook.concurrent.unwrap_or(true);
 
         Ok(hook)
     }

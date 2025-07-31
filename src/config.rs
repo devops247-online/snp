@@ -42,6 +42,7 @@ pub struct Hook {
     pub files: Option<String>,
     pub exclude: Option<String>,
     pub types: Option<Vec<String>>,
+    pub types_or: Option<Vec<String>>,
     pub exclude_types: Option<Vec<String>>,
     pub additional_dependencies: Option<Vec<String>>,
     pub args: Option<Vec<String>>,
@@ -51,6 +52,7 @@ pub struct Hook {
     pub stages: Option<Vec<String>>,
     pub verbose: Option<bool>,
     pub depends_on: Option<Vec<String>>,
+    pub concurrent: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -417,6 +419,15 @@ impl Config {
                             .map(|s| s.to_string())
                             .collect()
                     }),
+                types_or: hook_def
+                    .get("types_or")
+                    .and_then(|v| v.as_sequence())
+                    .map(|seq| {
+                        seq.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .collect()
+                    }),
                 exclude_types: hook_def
                     .get("exclude_types")
                     .and_then(|v| v.as_sequence())
@@ -466,6 +477,7 @@ impl Config {
                             .map(|s| s.to_string())
                             .collect()
                     }),
+                concurrent: hook_def.get("concurrent").and_then(|v| v.as_bool()),
             };
 
             hooks_map.insert(hook_id.to_string(), hook);
@@ -503,6 +515,10 @@ impl Config {
             user_hook.types = repo_hook.types.clone();
         }
 
+        if user_hook.types_or.is_none() && repo_hook.types_or.is_some() {
+            user_hook.types_or = repo_hook.types_or.clone();
+        }
+
         if user_hook.exclude_types.is_none() && repo_hook.exclude_types.is_some() {
             user_hook.exclude_types = repo_hook.exclude_types.clone();
         }
@@ -536,6 +552,10 @@ impl Config {
         // For args, merge repository args with user args (user args take precedence)
         if user_hook.args.is_none() && repo_hook.args.is_some() {
             user_hook.args = repo_hook.args.clone();
+        }
+
+        if user_hook.concurrent.is_none() && repo_hook.concurrent.is_some() {
+            user_hook.concurrent = repo_hook.concurrent;
         }
     }
 }

@@ -30,6 +30,7 @@ fn create_mock_hook(id: &str, language: &str) -> Hook {
         pass_filenames: true,
         minimum_pre_commit_version: None,
         depends_on: vec![],
+        concurrent: true,
         fail_fast: false,
         verbose: false,
     }
