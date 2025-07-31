@@ -153,7 +153,7 @@ async fn test_hook_execution_engine_integration() {
     let mut engine = HookExecutionEngine::new(process_manager, storage);
 
     // Create a hook that will fail due to missing executable
-    let hook = Hook::new("missing-executable", "nonexistent-command", "python")
+    let hook = Hook::new("missing-executable", "nonexistent-command", "system")
         .with_stages(vec![Stage::PreCommit])
         .always_run(true);
 
