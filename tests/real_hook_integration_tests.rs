@@ -1,8 +1,8 @@
 // Integration tests with real hooks to verify file modification detection works correctly
 // Tests the complete pipeline from hook execution to user output
 
+use assert_cmd::Command;
 use std::path::PathBuf;
-use std::process::Command;
 use tempfile::tempdir;
 use tokio::fs;
 
@@ -49,9 +49,7 @@ repos:
         config_path: &PathBuf,
         cwd: &std::path::Path,
     ) -> anyhow::Result<std::process::Output> {
-        let snp_binary = std::env::current_dir().unwrap().join("target/debug/snp");
-
-        let output = Command::new(snp_binary)
+        let output = Command::cargo_bin("snp")?
             .args(["run", "--hook-stage=pre-commit"])
             .current_dir(cwd)
             .env("PRE_COMMIT_CONFIG", config_path)
@@ -80,13 +78,13 @@ repos:
                 .unwrap();
 
         // Initialize a git repo in the temp directory
-        Command::new("git")
+        std::process::Command::new("git")
             .args(["init"])
             .current_dir(temp_dir.path())
             .output()
             .unwrap();
 
-        Command::new("git")
+        std::process::Command::new("git")
             .args(["add", "small_test_file.txt"])
             .current_dir(temp_dir.path())
             .output()
@@ -136,13 +134,13 @@ repos:
             .unwrap();
 
         // Initialize a git repo
-        Command::new("git")
+        std::process::Command::new("git")
             .args(["init"])
             .current_dir(temp_dir.path())
             .output()
             .unwrap();
 
-        Command::new("git")
+        std::process::Command::new("git")
             .args(["add", "file_with_whitespace.py"])
             .current_dir(temp_dir.path())
             .output()
@@ -203,13 +201,13 @@ repos:
         .unwrap();
 
         // Initialize git repo and add files
-        Command::new("git")
+        std::process::Command::new("git")
             .args(["init"])
             .current_dir(temp_dir.path())
             .output()
             .unwrap();
 
-        Command::new("git")
+        std::process::Command::new("git")
             .args(["add", "whitespace.py", "no_eof.py", "small.py"])
             .current_dir(temp_dir.path())
             .output()
@@ -288,13 +286,13 @@ repos:
                 .unwrap();
 
         // Initialize git and add all files
-        Command::new("git")
+        std::process::Command::new("git")
             .args(["init"])
             .current_dir(temp_dir.path())
             .output()
             .unwrap();
 
-        Command::new("git")
+        std::process::Command::new("git")
             .args(["add", "."])
             .current_dir(temp_dir.path())
             .output()
