@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2025-07-31
+
 ### Added
 - Advanced work-stealing task scheduler for optimal parallel execution with load balancing
 - Multi-tier caching architecture (L1/L2/L3) with intelligent promotion/demotion algorithms
