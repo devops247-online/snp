@@ -137,6 +137,66 @@ async fn detect_modified_files(
     Ok(modified_files)
 }
 
+/// Determine if a hook is likely to modify files based on its entry/name
+/// This is a simple heuristic to avoid false positives for read-only hooks
+fn hook_likely_modifies_files(hook: &crate::core::Hook) -> bool {
+    let entry_lower = hook.entry.to_lowercase();
+    let id_lower = hook.id.to_lowercase();
+
+    // Known read-only patterns - hooks that should never modify files
+    let readonly_patterns = [
+        "check-",
+        "detect-",
+        "validate-",
+        "lint",
+        "test",
+        "audit",
+        "bandit",
+        "mypy",
+        "flake8",
+        "pylint",
+        "pydocstyle",
+        "pycodestyle",
+    ];
+
+    // Check if this is a known read-only hook
+    for pattern in &readonly_patterns {
+        if id_lower.contains(pattern) || entry_lower.contains(pattern) {
+            return false;
+        }
+    }
+
+    // Known file-modifying patterns
+    let modifying_patterns = [
+        "format",
+        "fix",
+        "fixer",
+        "black",
+        "autopep8",
+        "isort",
+        "prettier",
+        "rustfmt",
+        "trailing-whitespace",
+        "end-of-file-fixer",
+    ];
+
+    // Check if this is a known file-modifying hook
+    for pattern in &modifying_patterns {
+        if id_lower.contains(pattern) || entry_lower.contains(pattern) {
+            return true;
+        }
+    }
+
+    // If we have --fix in args, it's likely to modify files
+    if hook.args.iter().any(|arg| arg.contains("--fix")) {
+        return true;
+    }
+
+    // Default to false (read-only) to avoid false positives
+    // This is safer than assuming hooks modify files
+    false
+}
+
 /// Python-specific error types
 #[derive(Debug, Error)]
 pub enum PythonError {
@@ -1800,18 +1860,27 @@ impl Language for PythonLanguagePlugin {
 
         let duration = start_time.elapsed();
 
-        // Detect file modifications after execution
-        let files_modified = detect_modified_files(files, &file_states_before).await?;
-        if !files_modified.is_empty() {
-            tracing::debug!(
-                "Hook {} modified {} files: {:?}",
-                hook.id,
-                files_modified.len(),
-                files_modified
-            );
+        // Only check for file modifications if hook is expected to modify files
+        let files_modified = if hook_likely_modifies_files(hook) {
+            let modified = detect_modified_files(files, &file_states_before).await?;
+            if !modified.is_empty() {
+                tracing::debug!(
+                    "Hook {} modified {} files: {:?}",
+                    hook.id,
+                    modified.len(),
+                    modified
+                );
+            } else {
+                tracing::debug!("Hook {} (file-modifying) modified no files", hook.id);
+            }
+            modified
         } else {
-            tracing::debug!("Hook {} modified no files", hook.id);
-        }
+            tracing::debug!(
+                "Hook {} is read-only, skipping modification detection",
+                hook.id
+            );
+            Vec::new()
+        };
 
         // Debug: log the actual files_modified that will be used in the result
         tracing::debug!(
