@@ -333,6 +333,7 @@ async fn test_nodejs_hook_execution() {
         verbose: false,
         minimum_pre_commit_version: None,
         depends_on: vec![],
+        concurrent: true,
     };
 
     // Test hook execution
@@ -491,6 +492,7 @@ async fn test_command_construction() {
         verbose: false,
         minimum_pre_commit_version: None,
         depends_on: vec![],
+        concurrent: true,
     };
 
     let files = vec![PathBuf::from("src/main.js"), PathBuf::from("src/utils.js")];

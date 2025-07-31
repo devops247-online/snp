@@ -912,6 +912,7 @@ mod tests {
             stages: None,
             verbose: None,
             depends_on: None,
+            concurrent: None,
         };
         let result = validator.validate_hook(&hook, 0);
 
@@ -937,6 +938,7 @@ mod tests {
             stages: Some(vec!["pre-commit".to_string()]),
             verbose: Some(false),
             depends_on: None,
+            concurrent: None,
         };
         let valid_result = validator.validate_hook(&valid_hook, 0);
         assert!(valid_result.is_valid);
@@ -960,6 +962,7 @@ mod tests {
             stages: Some(vec!["pre-commit".to_string()]),
             verbose: None,
             depends_on: None,
+            concurrent: None,
         };
         let invalid_regex_result = validator.validate_hook(&invalid_regex_hook, 0);
         assert!(!invalid_regex_result.is_valid);
@@ -1004,6 +1007,7 @@ mod tests {
                 stages: Some(vec!["pre-commit".to_string()]),
                 verbose: None,
                 depends_on: None,
+                concurrent: None,
             }],
         };
 
@@ -1032,6 +1036,7 @@ mod tests {
                 stages: Some(vec!["pre-commit".to_string()]),
                 verbose: None,
                 depends_on: None,
+                concurrent: None,
             }],
         };
 
@@ -1068,6 +1073,7 @@ mod tests {
                         stages: Some(vec!["pre-commit".to_string()]),
                         verbose: None,
                         depends_on: None,
+                        concurrent: None,
                     }],
                 },
                 Repository {
@@ -1091,6 +1097,7 @@ mod tests {
                         stages: Some(vec!["pre-commit".to_string()]),
                         verbose: None,
                         depends_on: None,
+                        concurrent: None,
                     }],
                 },
             ],
@@ -1223,6 +1230,7 @@ mod tests {
                     stages: Some(vec!["pre-commit".to_string()]),
                     verbose: None,
                     depends_on: None,
+                    concurrent: None,
                 }],
             }],
             default_install_hook_types: None,
@@ -1424,6 +1432,7 @@ mod tests {
             stages: Some(vec!["pre-commit".to_string()]),
             verbose: None,
             depends_on: None,
+            concurrent: None,
         };
 
         let mut validator_mut = validator;
@@ -1456,6 +1465,7 @@ mod tests {
             stages: Some(vec![]), // Empty stages
             verbose: None,
             depends_on: None,
+            concurrent: None,
         };
 
         let result = validator.validate_hook(&empty_stages_hook, 0);
@@ -1481,6 +1491,7 @@ mod tests {
             stages: Some(vec!["invalid-stage".to_string()]),
             verbose: None,
             depends_on: None,
+            concurrent: None,
         };
 
         let result = validator.validate_hook(&invalid_stage_hook, 0);
@@ -1525,6 +1536,7 @@ mod tests {
                 stages: Some(vec!["pre-commit".to_string()]),
                 verbose: None,
                 depends_on: None,
+                concurrent: None,
             }],
         };
 
@@ -1554,6 +1566,7 @@ mod tests {
                 stages: Some(vec!["pre-commit".to_string()]),
                 verbose: None,
                 depends_on: None,
+                concurrent: None,
             }],
         };
 

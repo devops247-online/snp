@@ -333,6 +333,10 @@ async fn load_repository_hooks(repo_path: &Path, specific_hook: Option<&str>) ->
                         .collect()
                 })
                 .unwrap_or_default(),
+            concurrent: hook_def
+                .get("concurrent")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
         };
 
         hooks.push(hook);
@@ -509,6 +513,7 @@ mod tests {
             fail_fast: false,
             minimum_pre_commit_version: None,
             depends_on: vec![],
+            concurrent: true,
         }
     }
 
@@ -882,6 +887,7 @@ mod tests {
             fail_fast: false,
             minimum_pre_commit_version: None,
             depends_on: vec![],
+            concurrent: true,
         };
 
         let files = vec![PathBuf::from("test.py")];

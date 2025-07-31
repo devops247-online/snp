@@ -52,6 +52,7 @@ pub struct Hook {
     pub stages: Option<Vec<String>>,
     pub verbose: Option<bool>,
     pub depends_on: Option<Vec<String>>,
+    pub concurrent: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -476,6 +477,7 @@ impl Config {
                             .map(|s| s.to_string())
                             .collect()
                     }),
+                concurrent: hook_def.get("concurrent").and_then(|v| v.as_bool()),
             };
 
             hooks_map.insert(hook_id.to_string(), hook);
@@ -550,6 +552,10 @@ impl Config {
         // For args, merge repository args with user args (user args take precedence)
         if user_hook.args.is_none() && repo_hook.args.is_some() {
             user_hook.args = repo_hook.args.clone();
+        }
+
+        if user_hook.concurrent.is_none() && repo_hook.concurrent.is_some() {
+            user_hook.concurrent = repo_hook.concurrent;
         }
     }
 }

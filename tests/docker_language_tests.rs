@@ -468,6 +468,7 @@ async fn test_docker_hook_execution() {
                 stages: vec![Stage::PreCommit],
                 minimum_pre_commit_version: None,
                 depends_on: vec![],
+                concurrent: true,
             };
 
             let files = vec![PathBuf::from("test.txt")];
@@ -605,6 +606,7 @@ async fn test_stdin_stdout_stderr_handling() {
                 stages: vec![Stage::PreCommit],
                 minimum_pre_commit_version: None,
                 depends_on: vec![],
+                concurrent: true,
             };
 
             let test_file = temp_dir.path().join("test.txt");
@@ -991,6 +993,7 @@ async fn test_docker_command_construction() {
                 stages: vec![Stage::PreCommit],
                 minimum_pre_commit_version: None,
                 depends_on: vec![],
+                concurrent: true,
             };
 
             let files = vec![PathBuf::from("test.txt")];
@@ -1124,6 +1127,7 @@ async fn test_docker_execution_timeout() {
                 stages: vec![Stage::PreCommit],
                 minimum_pre_commit_version: None,
                 depends_on: vec![],
+                concurrent: true,
             };
 
             let files = vec![];

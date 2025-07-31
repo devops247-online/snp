@@ -2150,6 +2150,7 @@ mod tests {
             minimum_pre_commit_version: None,
             depends_on: vec![],
             verbose: false,
+            concurrent: true,
         }
     }
 
