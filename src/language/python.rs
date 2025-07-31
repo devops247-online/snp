@@ -1771,7 +1771,7 @@ impl Language for PythonLanguagePlugin {
                         hook_id: hook.id.clone(),
                         success: false, // Skipped hooks are not considered successful for aggregation
                         skipped: true,
-                        skip_reason: Some("executable not found".to_string()), // More accurate reason
+                        skip_reason: Some("no files to check".to_string()), // Match Python pre-commit message
                         exit_code: None,
                         duration: start_time.elapsed(),
                         files_processed: files.to_vec(),

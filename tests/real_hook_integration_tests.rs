@@ -111,14 +111,13 @@ repos:
             "check-added-large-files should not show file modifications, but output was: {stdout}"
         );
 
-        // It should show "Passed" for check-added-large-files, or "Skipped" if executable not found in CI
+        // It should show "Passed" for check-added-large-files, or "Skipped" if executable not available in CI
         let has_hook_output = stdout.contains("Check Added Large Files");
         let is_passed = stdout.contains("Passed");
-        let is_skipped_missing_exec =
-            stdout.contains("Skipped") || stdout.contains("executable not found");
+        let is_skipped = stdout.contains("Skipped");
 
         assert!(
-            has_hook_output && (is_passed || is_skipped_missing_exec),
+            has_hook_output && (is_passed || is_skipped),
             "check-added-large-files should show as Passed or Skipped (if executable missing), but output was: {stdout}"
         );
     }
