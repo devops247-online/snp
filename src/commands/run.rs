@@ -151,19 +151,9 @@ pub async fn execute_run_command_with_pools(
         execution_engine
             .execute_hooks_with_pools(&hooks, config)
             .await
-            .map_err(|e| {
-                tracing::error!("Pooled hook execution failed: {}", e);
-                e
-            })
     } else {
         tracing::debug!("Executing hooks (traditional mode)");
-        execution_engine
-            .execute_hooks(&hooks, config)
-            .await
-            .map_err(|e| {
-                tracing::error!("Hook execution failed: {}", e);
-                e
-            })
+        execution_engine.execute_hooks(&hooks, config).await
     }
 }
 
@@ -291,19 +281,11 @@ pub async fn execute_run_command_single_hook_with_pools(
         execution_engine
             .execute_hooks_with_pools(&filtered_hooks, config)
             .await
-            .map_err(|e| {
-                tracing::error!("Pooled single hook execution failed: {}", e);
-                e
-            })
     } else {
         tracing::debug!("Executing single hook: {}", hook_id);
         execution_engine
             .execute_hooks(&filtered_hooks, config)
             .await
-            .map_err(|e| {
-                tracing::error!("Single hook execution failed: {}", e);
-                e
-            })
     }
 }
 
