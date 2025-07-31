@@ -521,18 +521,48 @@ impl SystemLanguagePlugin {
         // Execute with timeout
         let output = if let Some(timeout) = command.timeout {
             match tokio::time::timeout(timeout, tokio_cmd.output()).await {
-                Ok(output) => output.map_err(|e| {
-                    SnpError::from(LanguageError::EnvironmentSetupFailed {
-                        language: "system".to_string(),
-                        error: format!(
-                            "Failed to execute '{}' with args {:?} in dir {:?}: {}",
-                            command.executable, command.arguments, command.working_directory, e
-                        ),
-                        recovery_suggestion: Some(
-                            "Check if the command exists and is executable".to_string(),
-                        ),
-                    })
-                })?,
+                Ok(output) => match output {
+                    Ok(out) => out,
+                    Err(e) => {
+                        // Check if this is a missing executable error (like Python plugin does)
+                        if e.kind() == std::io::ErrorKind::NotFound {
+                            tracing::debug!(
+                                "System hook executable '{}' not found, skipping gracefully: {}",
+                                command.executable,
+                                e
+                            );
+                            let duration = start_time.elapsed();
+                            return Ok(HookExecutionResult {
+                                hook_id: "system".to_string(),
+                                success: false, // Skipped hooks are not considered successful for aggregation
+                                skipped: true,
+                                skip_reason: Some("no files to check".to_string()), // Match Python pre-commit message
+                                exit_code: None,
+                                duration,
+                                files_processed: vec![],
+                                files_modified: vec![],
+                                stdout: String::new(),
+                                stderr: String::new(),
+                                error: None,
+                            });
+                        } else {
+                            // For other errors, propagate them as before
+                            return Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
+                                language: "system".to_string(),
+                                error: format!(
+                                    "Failed to execute '{}' with args {:?} in dir {:?}: {}",
+                                    command.executable,
+                                    command.arguments,
+                                    command.working_directory,
+                                    e
+                                ),
+                                recovery_suggestion: Some(
+                                    "Check if the command exists and is executable".to_string(),
+                                ),
+                            }));
+                        }
+                    }
+                },
                 Err(_) => {
                     // Handle timeout - create a failed result instead of returning error
                     let duration = start_time.elapsed();
@@ -556,18 +586,45 @@ impl SystemLanguagePlugin {
                 }
             }
         } else {
-            tokio_cmd.output().await.map_err(|e| {
-                SnpError::from(LanguageError::EnvironmentSetupFailed {
-                    language: "system".to_string(),
-                    error: format!(
-                        "Failed to execute '{}' with args {:?} in dir {:?}: {}",
-                        command.executable, command.arguments, command.working_directory, e
-                    ),
-                    recovery_suggestion: Some(
-                        "Check if the command exists and is executable".to_string(),
-                    ),
-                })
-            })?
+            match tokio_cmd.output().await {
+                Ok(out) => out,
+                Err(e) => {
+                    // Check if this is a missing executable error (like Python plugin does)
+                    if e.kind() == std::io::ErrorKind::NotFound {
+                        tracing::debug!(
+                            "System hook executable '{}' not found, skipping gracefully: {}",
+                            command.executable,
+                            e
+                        );
+                        let duration = start_time.elapsed();
+                        return Ok(HookExecutionResult {
+                            hook_id: "system".to_string(),
+                            success: false, // Skipped hooks are not considered successful for aggregation
+                            skipped: true,
+                            skip_reason: Some("no files to check".to_string()), // Match Python pre-commit message
+                            exit_code: None,
+                            duration,
+                            files_processed: vec![],
+                            files_modified: vec![],
+                            stdout: String::new(),
+                            stderr: String::new(),
+                            error: None,
+                        });
+                    } else {
+                        // For other errors, propagate them as before
+                        return Err(SnpError::from(LanguageError::EnvironmentSetupFailed {
+                            language: "system".to_string(),
+                            error: format!(
+                                "Failed to execute '{}' with args {:?} in dir {:?}: {}",
+                                command.executable, command.arguments, command.working_directory, e
+                            ),
+                            recovery_suggestion: Some(
+                                "Check if the command exists and is executable".to_string(),
+                            ),
+                        }));
+                    }
+                }
+            }
         };
 
         let duration = start_time.elapsed();
