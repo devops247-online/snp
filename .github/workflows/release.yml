@@ -226,7 +226,7 @@ jobs:
           fi
 
       - name: Download release assets
-        uses: robinraju/release-downloader@v1.11
+        uses: robinraju/release-downloader@v1.12
         with:
           tag: ${{ steps.get_tag.outputs.tag }}
           fileName: "*.sha256"
