@@ -134,12 +134,26 @@ pub async fn execute_run_command_with_pools(
         execution_config.stage
     );
 
-    // Get files to process - if no files specified, use staged files
+    // Get files to process - if no files specified, use appropriate files based on stage
     let mut config = execution_config.clone();
     if config.files.is_empty() && !config.all_files {
-        let staged_files = git_repo.staged_files()?;
-        tracing::debug!("Using {} staged files", staged_files.len());
-        config = config.with_files(staged_files);
+        let files = match execution_config.stage {
+            Stage::PrePush => {
+                // For pre-push hooks, run on all tracked files
+                // This matches Python pre-commit behavior for pre-push
+                git_repo.all_files()?
+            }
+            _ => {
+                // For pre-commit and other stages, use staged files
+                git_repo.staged_files()?
+            }
+        };
+        tracing::debug!(
+            "Using {} files for stage {:?}",
+            files.len(),
+            execution_config.stage
+        );
+        config = config.with_files(files);
     }
 
     // Set working directory from repo_path
@@ -264,12 +278,26 @@ pub async fn execute_run_command_single_hook_with_pools(
     let process_manager = Arc::new(ProcessManager::new());
     let mut execution_engine = HookExecutionEngine::new(process_manager, storage);
 
-    // Get files to process - if no files specified, use staged files
+    // Get files to process - if no files specified, use appropriate files based on stage
     let mut config = execution_config.clone();
     if config.files.is_empty() && !config.all_files {
-        let staged_files = git_repo.staged_files()?;
-        tracing::debug!("Using {} staged files", staged_files.len());
-        config = config.with_files(staged_files);
+        let files = match execution_config.stage {
+            Stage::PrePush => {
+                // For pre-push hooks, run on all tracked files
+                // This matches Python pre-commit behavior for pre-push
+                git_repo.all_files()?
+            }
+            _ => {
+                // For pre-commit and other stages, use staged files
+                git_repo.staged_files()?
+            }
+        };
+        tracing::debug!(
+            "Using {} files for stage {:?}",
+            files.len(),
+            execution_config.stage
+        );
+        config = config.with_files(files);
     }
 
     // Set working directory from repo_path
