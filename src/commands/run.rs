@@ -9,68 +9,15 @@ use crate::git::GitRepository;
 use crate::process::ProcessManager;
 use crate::storage::Store;
 use std::path::{Path, PathBuf};
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-static STORAGE_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-// Use OnceLock to create a global mutex for test storage creation
-use std::sync::{Mutex, OnceLock};
-
-static TEST_STORAGE_CREATION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+use std::sync::Arc;
 
 /// Create an isolated storage instance for tests to prevent database locking issues
 fn create_test_storage() -> Result<Arc<Store>> {
-    // Use a global lock to prevent concurrent storage creation during tests
-    // This is only used during tests to prevent SQLite database locking issues
-    let _lock = TEST_STORAGE_CREATION_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap();
+    // Use in-memory database for tests to completely eliminate file system locking issues
+    // This is the most reliable approach for concurrent test execution
+    tracing::debug!("Creating in-memory test storage");
 
-    let counter = STORAGE_COUNTER.fetch_add(1, Ordering::SeqCst);
-    let thread_id = std::thread::current().id();
-    let process_id = std::process::id();
-
-    // Add timestamp and random component for maximum uniqueness
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    // Use thread ID hash and timestamp for pseudo-randomness to avoid adding rand dependency
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    thread_id.hash(&mut hasher);
-    let thread_hash = hasher.finish();
-    let random_component = thread_hash.wrapping_mul(timestamp as u64);
-
-    let unique_cache_dir = std::env::temp_dir().join(format!(
-        "snp_test_cache_{counter}_{process_id}_{thread_id:?}_{timestamp}_{random_component}"
-    ));
-
-    // Ensure the directory doesn't exist from previous runs
-    if unique_cache_dir.exists() {
-        let _ = std::fs::remove_dir_all(&unique_cache_dir);
-    }
-
-    std::fs::create_dir_all(&unique_cache_dir)?;
-
-    // Add a small random delay to reduce timing conflicts during concurrent test execution
-    // This helps prevent simultaneous SQLite database initialization
-    let delay_ms = random_component % 50; // 0-49ms random delay
-    if delay_ms > 0 {
-        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-    }
-
-    tracing::debug!("Created test storage directory: {:?}", unique_cache_dir);
-
-    // Create storage instance with enhanced isolation
-    let store = Store::with_cache_directory(unique_cache_dir.clone())?;
-
+    let store = Store::with_memory_database()?;
     Ok(Arc::new(store))
 }
 
@@ -134,12 +81,26 @@ pub async fn execute_run_command_with_pools(
         execution_config.stage
     );
 
-    // Get files to process - if no files specified, use staged files
+    // Get files to process - if no files specified, use appropriate files based on stage
     let mut config = execution_config.clone();
     if config.files.is_empty() && !config.all_files {
-        let staged_files = git_repo.staged_files()?;
-        tracing::debug!("Using {} staged files", staged_files.len());
-        config = config.with_files(staged_files);
+        let files = match execution_config.stage {
+            Stage::PrePush => {
+                // For pre-push hooks, run on all tracked files
+                // This matches Python pre-commit behavior for pre-push
+                git_repo.all_files()?
+            }
+            _ => {
+                // For pre-commit and other stages, use staged files
+                git_repo.staged_files()?
+            }
+        };
+        tracing::debug!(
+            "Using {} files for stage {:?}",
+            files.len(),
+            execution_config.stage
+        );
+        config = config.with_files(files);
     }
 
     // Set working directory from repo_path
@@ -264,12 +225,26 @@ pub async fn execute_run_command_single_hook_with_pools(
     let process_manager = Arc::new(ProcessManager::new());
     let mut execution_engine = HookExecutionEngine::new(process_manager, storage);
 
-    // Get files to process - if no files specified, use staged files
+    // Get files to process - if no files specified, use appropriate files based on stage
     let mut config = execution_config.clone();
     if config.files.is_empty() && !config.all_files {
-        let staged_files = git_repo.staged_files()?;
-        tracing::debug!("Using {} staged files", staged_files.len());
-        config = config.with_files(staged_files);
+        let files = match execution_config.stage {
+            Stage::PrePush => {
+                // For pre-push hooks, run on all tracked files
+                // This matches Python pre-commit behavior for pre-push
+                git_repo.all_files()?
+            }
+            _ => {
+                // For pre-commit and other stages, use staged files
+                git_repo.staged_files()?
+            }
+        };
+        tracing::debug!(
+            "Using {} files for stage {:?}",
+            files.len(),
+            execution_config.stage
+        );
+        config = config.with_files(files);
     }
 
     // Set working directory from repo_path

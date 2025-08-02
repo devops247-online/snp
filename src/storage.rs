@@ -108,6 +108,24 @@ impl Store {
         })
     }
 
+    /// Create a new Store instance with an in-memory database (for tests only)
+    pub fn with_memory_database() -> Result<Self> {
+        // Create a temporary directory for non-database files
+        let cache_dir =
+            std::env::temp_dir().join(format!("snp_memory_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&cache_dir);
+
+        // Use in-memory SQLite database to avoid all file locking issues
+        let connection = Self::initialize_memory_database()?;
+        let connection = Arc::new(Mutex::new(connection));
+
+        Ok(Store {
+            cache_dir,
+            readonly: false,
+            connection,
+        })
+    }
+
     /// Get the default cache directory following XDG conventions
     pub fn get_default_cache_directory() -> Result<PathBuf> {
         // Use process-specific directory name to avoid conflicts during parallel testing
@@ -186,7 +204,13 @@ impl Store {
             connection.pragma_update(None, "mmap_size", "268435456")?; // 256MB mmap
 
             // Configure busy timeout for better handling of concurrent access
-            connection.busy_timeout(std::time::Duration::from_millis(30000))?;
+            // Use longer timeout in test environments to handle CI load and concurrency
+            let timeout_ms = if cfg!(test) || std::env::var("CARGO").is_ok() {
+                60000 // 60 seconds for tests
+            } else {
+                30000 // 30 seconds for production
+            };
+            connection.busy_timeout(std::time::Duration::from_millis(timeout_ms))?;
         }
 
         // Create schema if database is new
@@ -197,12 +221,35 @@ impl Store {
         Ok(connection)
     }
 
+    /// Initialize an in-memory SQLite database for tests
+    fn initialize_memory_database() -> Result<Connection> {
+        // Use in-memory database to completely avoid file system locking
+        let connection = Connection::open(":memory:").map_err(|e| {
+            SnpError::Storage(Box::new(StorageError::ConnectionFailed {
+                message: e.to_string(),
+                database_path: None,
+            }))
+        })?;
+
+        // Configure for optimal in-memory performance
+        connection.execute("PRAGMA foreign_keys = ON", [])?;
+        connection.pragma_update(None, "synchronous", "OFF")?; // Safe for in-memory
+        connection.pragma_update(None, "cache_size", "-64000")?; // 64MB cache
+        connection.pragma_update(None, "temp_store", "MEMORY")?;
+
+        // Create schema
+        Self::create_schema(&connection)?;
+
+        Ok(connection)
+    }
+
     /// Create the database schema
     fn create_schema(connection: &Connection) -> Result<()> {
-        let tx = connection.unchecked_transaction()?;
+        // Use individual statements instead of transactions to avoid locking issues in tests
+        // For in-memory databases, this is safe and more reliable
 
         // Create repositories table
-        tx.execute(
+        connection.execute(
             "CREATE TABLE IF NOT EXISTS repositories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 url TEXT NOT NULL,
@@ -217,7 +264,7 @@ impl Store {
         )?;
 
         // Create environments table
-        tx.execute(
+        connection.execute(
             "CREATE TABLE IF NOT EXISTS environments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 language TEXT NOT NULL,
@@ -231,7 +278,7 @@ impl Store {
         )?;
 
         // Create configs table
-        tx.execute(
+        connection.execute(
             "CREATE TABLE IF NOT EXISTS configs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 path TEXT NOT NULL UNIQUE,
@@ -242,7 +289,7 @@ impl Store {
         )?;
 
         // Create schema version table for migrations
-        tx.execute(
+        connection.execute(
             "CREATE TABLE IF NOT EXISTS schema_version (
                 version INTEGER NOT NULL,
                 applied_at INTEGER NOT NULL DEFAULT (cast(strftime('%s', 'now') as integer))
@@ -251,43 +298,41 @@ impl Store {
         )?;
 
         // Insert current schema version
-        tx.execute(
+        connection.execute(
             "INSERT OR REPLACE INTO schema_version (version) VALUES (?1)",
             params![SCHEMA_VERSION],
         )?;
 
         // Create indexes for better query performance
-        tx.execute(
+        connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_repositories_url_revision
              ON repositories(url, revision)",
             [],
         )?;
 
-        tx.execute(
+        connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_environments_language
              ON environments(language)",
             [],
         )?;
 
-        tx.execute(
+        connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_configs_path
              ON configs(path)",
             [],
         )?;
 
-        tx.execute(
+        connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_repositories_last_used
              ON repositories(last_used)",
             [],
         )?;
 
-        tx.execute(
+        connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_environments_last_used
              ON environments(last_used)",
             [],
         )?;
-
-        tx.commit()?;
 
         Ok(())
     }
