@@ -122,7 +122,7 @@ num_cpus = "1.16"
 arc-swap = "1.6"  # Atomic pointer updates for lock-free configuration
 
 # System monitoring
-sysinfo = "0.36"
+sysinfo = "0.37"
 whoami = "1.4"
 uuid = { version = "1.6", features = ["v4", "serde"] }
 
